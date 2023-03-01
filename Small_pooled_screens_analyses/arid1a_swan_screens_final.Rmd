@@ -1,0 +1,327 @@
+---
+title: "SP_screen_analysis"
+author: "Sunay"
+date: "10/25/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r}
+setwd("E:/Paper writing/CRIPSRi paper/Analyses/Small_pooled_screens_analyses")
+library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(cowplot)
+library(svglite)
+```
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+```
+
+
+### SP is the name for small pooled library for replicate screening, it has ~5K guides targeting ~1.6 genes either enriched or depleted in original screens, 200 non-targeting guides and 70 non-essential genes.
+and below SP refers to small pooled and WG refers to Whole genome screens
+
+import raw read counts for the SP screens in WT and mutant lines.
+```{r}
+read_counts <- read.delim("input/small_pooled_screen_read_counts.txt", sep=",")
+names(read_counts)
+```
+
+
+```{r}
+print(paste("the library consists of", length(read_counts$grna_id), "guides, targeting", length(unique(read_counts$Gene))))
+```
+## normalise reads and calculate log2 fold change
+```{r}
+names(read_counts)
+column_sums<- colSums(read_counts[15:19], na.rm = TRUE)
+
+read_counts$Log<- log2(((sweep(read_counts[15:19], 2, column_sums,FUN = "/", check.margin = TRUE))*10^6) +1)
+read_counts <- do.call("data.frame",read_counts)
+names(read_counts)
+read_counts$LFC <- read_counts[,20:23]- read_counts[,24]
+read_counts <- do.call("data.frame",read_counts)
+names(read_counts)
+SP_screens_LFC<- read_counts %>% select(1:13, 25:28)
+
+##correct column names
+names(SP_screens_LFC) <- gsub(x = names(SP_screens_LFC), pattern = "LFC.Log.", replacement = "")
+
+```
+
+```{r}
+##calculate average LFC for each screen
+
+SP_screens_LFC$WT_Av<- (SP_screens_LFC$SP_WT_1 +SP_screens_LFC$SP_WT_2)/2
+SP_screens_LFC$SP_Mutant_Av<- (SP_screens_LFC$SP_Mut_1 +SP_screens_LFC$SP_Mut_2)/2
+
+```
+
+### calculate gene mean LFC
+```{r}
+names(SP_screens_LFC)
+SP_screens_LFC_Gene<- SP_screens_LFC %>% select(3:19) %>%  group_by(Gene, func) %>% 
+  summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}"
+  )) %>% droplevels() %>% rename(SP_WT_Av=WT_Av) %>% filter(func != "Control3") %>% droplevels()
+
+scatter1<-SP_screens_LFC_Gene %>% ggplot(aes(x=SP_WT_Av, y=SP_Mutant_Av, color=func))+geom_point(size=0.5)+theme_su()+ stat_cor(aes(x=SP_WT_Av, y=SP_Mutant_Av, label=..r.label..), inherit.aes = F,size=3)+xlab(expression(paste("ARID1A" ^"+/+","Cells")))+ylab(expression(paste("ARID1A" ^"+/-","Cells")))+scale_color_nejm(name="Target Gene Function",labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-targeting_control", "Other"="Other Genes"))
+scatter1
+
+
+
+xdens <- axis_canvas(scatter1, axis = "x")+
+  geom_density(data = SP_screens_LFC_Gene, aes(x = SP_WT_Av, fill = func),
+              alpha = 0.7, size = 0.2)+
+ scale_fill_nejm()
+
+ydens <- axis_canvas(scatter1, axis = "y", coord_flip = T)+
+  geom_density(data = SP_screens_LFC_Gene, aes(x = SP_Mutant_Av, fill = func),
+              alpha = 0.7, size = 0.2)+
+ scale_fill_nejm()+coord_flip()
+
+
+p1 <- insert_xaxis_grob(scatter1, xdens, grid::unit(.2, "null"), position = "top")
+p2<- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
+ggdraw(p2)
+sup_fig_6_a<- annotate_figure(p2, top=text_grob(" Small Pooled Screen", size = 8), bottom = text_grob("Gene Mean Log2 Fold Change", size=6),left = text_grob("Gene Mean Log2 Fold Change", size=6, rot=90))
+sup_fig_6_a
+ggsave(sup_fig_6_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/sup_fig_6_a.svg", width = 4, height = 3, units = "in", dpi=1000)
+
+```
+
+
+### import LFC from Whole Genome Screens
+```{r}
+WG_LFC <- read.csv("input/Whole_Genome_Gene_LFC.txt")
+
+
+```
+###Combine Whole genome and small pooled LFC values
+```{r}
+
+a<-SP_screens_LFC_Gene %>% select(Gene, func, SP_WT_Av, SP_Mutant_Av)
+
+b<- WG_LFC %>% select(Gene, WG_Mut, WG_WT, group)
+SP_WG_LFC_Gene<- left_join(a,b, by="Gene")
+
+
+
+```
+
+
+
+
+show correlation with a scatter plot
+```{r}
+names(SP_WG_LFC_Gene)
+
+scatter1<-
+ggplot()+ geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="Other")),aes(x=SP_WT_Av, y=WG_WT, color=func), size=0.3)+
+  geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="CEG")),aes(x=SP_WT_Av, y=WG_WT, color=func), size=0.5, alpha=0.5)+ geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="NEG")),aes(x=SP_WT_Av, y=WG_WT, color=func), size=0.5, alpha=0.5)+ stat_cor(data = (SP_WG_LFC_Gene), aes(x=SP_WT_Av, y=WG_WT, label = ..r.label..),size=3)+theme_su()+ scale_color_nejm(name="Gene Function",                                                labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "Non-targeting_control"="Control", "Other"="Other Genes"))+theme(legend.position = "bottom", axis.title = element_blank())+ ggtitle(expression(paste("ARID1A" ^"+/+","Cells")))
+
+scatter2<-
+  ggplot()+ geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="Other")),aes(x=SP_Mutant_Av, y=WG_Mut, color=func), size=0.3)+
+  geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="CEG")),aes(x=SP_Mutant_Av, y=WG_Mut, color=func), size=0.5, alpha=0.5)+ geom_point(data=(SP_WG_LFC_Gene %>% filter(func=="NEG")),aes(x=SP_Mutant_Av, y=WG_Mut, color=func), size=0.5, alpha=0.5)+ stat_cor(data = (SP_WG_LFC_Gene), aes(x=SP_Mutant_Av, y=WG_Mut, label = ..r.label..),size=3)+theme_su()+ scale_color_nejm(name="Gene Function",                                                labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "Non-targeting_control"="Control", "Other"="Other Genes"))+theme(legend.position = "bottom", axis.title = element_blank())+ ggtitle(expression(paste("ARID1A" ^"+/-","Cells")))
+
+  
+  
+
+
+sup_fig_6_b<- ggarrange(scatter1, scatter2, common.legend = T, legend = "right")
+sup_fig_6_b<-annotate_figure(sup_fig_6_b, 
+bottom = text_grob("Gene Mean Log2 Fold Change\n Small Pooled Screen", hjust = 1, size=6),
+  left =text_grob("Genome-wide Pooled Screen \nGene Mean Log2 Fold Change", rot=90, size=6), top =text_grob("Comparison of genome-wide and small pooled screens", size = 8 ))
+sup_fig_6_b
+
+ggsave(sup_fig_6_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/sup_fig_6_b.svg", width = 4, height = 2.5, units = "in", dpi=1000)
+
+```
+
+### compare LFC rank differences
+```{r}
+names(SP_WG_LFC_Gene)
+SP_WG_LFC_Gene<- do.call(data.frame, SP_WG_LFC_Gene)
+a<- SP_WG_LFC_Gene %>%
+  mutate(SP_WT_Av_rank=rank(SP_WT_Av),
+             SP_Mutant_Av_rank=rank(SP_Mutant_Av),
+             WG_WT_rank=rank(WG_WT),
+             WG_Mut_rank=rank(WG_Mut))
+a<- do.call(data.frame,a)
+a<-a %>% mutate(SP_rank_diff=(SP_WT_Av_rank-SP_Mutant_Av_rank),
+                 dol_rank_diff=(WG_WT_rank-WG_Mut_rank))
+a<- do.call(data.frame,a)
+a %>% ggplot(aes(x=SP_rank_diff, y=dol_rank_diff, color=group))+geom_point()
+
+
+
+sup_fig_3_c<- a %>% ggplot(aes(x=dol_rank_diff,y=SP_rank_diff, color=group))+geom_point(size=0.5)+stat_cor(aes(x=dol_rank_diff,y=SP_rank_diff, label=..r.label..), inherit.aes = F, size=3)+theme_su()+scale_color_nejm(name="Whole Genome Screen\nAnnotation")+xlab("Pooled Screen \n Rank Difference Between Gene Mean Log2 Fold Change")+ylab("Whole Genome Screen \n Rank Difference Between Gene Mean Log2 Fold Change")+ggtitle("Rank Difference Comparison")
+sup_fig_3_c
+
+
+ggsave(sup_fig_3_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/sup_fig_6_c.svg", width = 3.5, height = 3, units="in", dpi=1000)
+
+
+```
+
+### add bagel results
+all screens were analysed by bagel v2 at guide level, gene level BF values are calculated as mean of all guides for a gene
+```{r}
+SP_gene_BF <- read.delim("input/SP_gene_BF.txt", sep=",")
+names(SP_gene_BF)
+WG_gene_BF <- read.delim("input/WG_gene_BF.txt", sep = ",")
+names(WG_gene_BF)
+
+
+## combine Small Pooled and Whole Genome gene level BF values
+
+
+SP_gene_BF<- SP_gene_BF %>% rename(Gene=GENE)
+all_BF<- left_join( SP_gene_BF, WG_gene_BF, by="Gene")
+names(all_BF)
+all_BF<- all_BF %>% select(Gene, func,BF_SP_HT, BF_SP_WT, WG_Mut_BF, WG_WT_BF, BF_Group=group, pool_group)
+summary(all_BF$BF_Group)
+
+
+```
+##Plotting
+
+```{r}
+names(all_BF)
+
+scatter3<-
+ggplot()+ geom_point(data=(all_BF %>% filter(func=="Other")),aes(x=BF_SP_WT, y=WG_WT_BF, color=func), size=0.3)+
+  geom_point(data=(all_BF %>% filter(func=="CEG")),aes(x=BF_SP_WT, y=WG_WT_BF, color=func), size=0.5, alpha=0.5)+ geom_point(data=(all_BF %>% filter(func=="NEG")),aes(x=BF_SP_WT, y=WG_WT_BF, color=func), size=0.5, alpha=0.5)+ stat_cor(data = (all_BF), aes(x=BF_SP_WT, y=WG_WT_BF, label = ..r.label..), size=3)+theme_su()+ scale_color_nejm(name="Gene Function",                                                labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "Non-targeting_control"="Control", "Other"="Other Genes"))+theme(legend.position = "bottom", axis.title = element_blank())+ ggtitle(expression(paste("ARID1A" ^"+/+","Cells")))
+
+
+scatter4<-
+  ggplot()+ geom_point(data=(all_BF %>% filter(func=="Other")),aes(x=BF_SP_HT, y=WG_Mut_BF, color=func), size=0.3)+
+  geom_point(data=(all_BF %>% filter(func=="CEG")),aes(x=BF_SP_HT, y=WG_Mut_BF, color=func), size=0.5, alpha=0.5)+ geom_point(data=(all_BF %>% filter(func=="NEG")),aes(x=BF_SP_HT, y=WG_Mut_BF, color=func), size=0.5, alpha=0.5)+ stat_cor(data = (all_BF), aes(x=BF_SP_HT, y=WG_Mut_BF, label = ..r.label..), size=3)+theme_su()+ scale_color_nejm(name="Gene Function",                                                labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "Non-targeting_control"="Control", "Other"="Other Genes"))+theme(legend.position = "bottom", axis.title = element_blank())+ ggtitle(expression(paste("ARID1A" ^"+/-","Cells")))
+
+  
+  
+
+
+sup_fig_6_d<- ggarrange(scatter3, scatter4, common.legend = T, legend = "right")
+sup_fig_6_d<-annotate_figure(sup_fig_6_d, 
+bottom = text_grob("BF Value\n Small Pooled Screen", hjust = 1, size=6),
+  left = text_grob("Genome-wide Pooled Screen \nBF Value", size=6, rot=90), top =text_grob("Comparison of genome-wide and small pooled screens", size = 8 ))
+sup_fig_6_d
+
+ggsave(sup_fig_6_d, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/sup_fig_6_d.svg", widt=4, height = 2.5, units = "in", dpi=1000 )
+
+
+```
+
+
+```{r}
+
+## heatmap
+
+
+cormat2<- round(cor(all_BF[,c(3:6)], method = "pearson"),3)
+library(reshape2)
+melted_cormat2 <- melt(cormat2)
+
+
+fig_6_c<-ggplot(data = melted_cormat2, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Whole Genome and Small Pooled Screens\nGene Level Bayes Value Correlation")+  geom_text(aes(label = round(value, 2)), size=3) +
+    scale_fill_gradient(low = "#EE799F", high = "#8B0000", name="Pearson Correlations") +theme(axis.title = element_blank())
+fig_6_c
+ggsave(fig_6_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/fig_6_c.svg", width = 4, height = 3, units = "in", dpi=1000)
+
+
+```
+
+
+
+
+```{r}
+all_BF<-all_BF %>% mutate(BF_SP_WT_rank=rank(BF_SP_WT),
+      BF_SP_HT_rank=rank(BF_SP_HT),
+      WG_WT_BF_rank=rank(WG_WT_BF),
+      WG_Mut_BF_rank=rank(WG_Mut_BF))
+
+### Plot rank difference between SP and WG screens
+all_BF$diff<- all_BF$WG_WT_BF-all_BF$WG_Mut_BF
+all_BF$SP_diff<- all_BF$BF_SP_WT- all_BF$BF_SP_HT
+
+
+
+fig_6_d<-all_BF %>% ggplot(aes(x=(BF_SP_WT_rank- BF_SP_HT_rank),y=(WG_WT_BF_rank- WG_Mut_BF_rank), color=BF_Group))+geom_point(size=0.5)+stat_cor(aes(x=(BF_SP_WT_rank- BF_SP_HT_rank),y=(WG_WT_BF_rank- WG_Mut_BF_rank), label=..r.label..),size=2, inherit.aes = F)+theme_su()+scale_color_nejm(name="Whole Genome \nScreen Phenotype\n(Number of Genes)", labels=c("Depleted"=paste("Depleted(",nrow(all_BF %>% filter(BF_Group=="Depleted")),")"),  "Enriched"=paste("Enriched(",nrow(all_BF %>% filter(BF_Group=="Enriched")),")"), "Normal"=paste("Other(",nrow(all_BF %>% filter(BF_Group=="Normal")),")")))+xlab("Pooled Screen \n Rank Difference Between BF Values")+ylab("Whole Genome Screen \n Rank Difference Between BF Values")+ggtitle("Whole Genome vs Small Pooled Screens\nComparison of Rank Difference")
+
+fig_6_d
+
+ggsave(fig_6_d, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/fig_6_d.svg", width = 3, height=2.5, units = "in" ,dpi=1000 )
+
+
+
+
+```
+
+
+
+
+
+###end of analyses
