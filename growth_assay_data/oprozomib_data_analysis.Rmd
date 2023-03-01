@@ -1,0 +1,141 @@
+---
+title: "Oprozomib treatment growth assays"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+
+library(tidyverse)
+library(reshape2)
+library(ggsci)
+library(ggpubr)
+library(svglite)
+```
+
+
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+```
+
+## in the first part of the screen wt and mutant lines were treated with different concentrations of oprozomib
+
+```{r}
+
+ 
+opro_ratio_to_no_drug_raw <- read_tsv("input/opro_ratio_to_no_drug_raw.txt")
+
+names(opro_ratio_to_no_drug_raw)
+mean_opro_ratio_to_no_drug_raw<- opro_ratio_to_no_drug_raw %>% group_by(sample, conc) %>% summarise(mean=mean(ratio), se=(sd(ratio)/sqrt(length(ratio))))
+
+fig_5_d<-mean_opro_ratio_to_no_drug_raw %>% ggplot(aes(x=as.factor(conc), y= mean, group=sample, color=sample), color=0.1)+geom_line()+geom_point()+theme_su()+scale_color_nejm(name="hiPSC Line", labels=c("ARID1A-HET"=expression(paste("ARID1A" ^"+/-")),"ARID1A-WT"=expression(paste("ARID1A" ^"+/+")))) +xlab(expression(paste("Concentration (μM)")))+ylab("Ratio to no-drug control")+ggtitle(expression(paste("Oprozomib Treatment Response")))+geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=0.5)
+
+
+fig_5_d
+
+ggsave(fig_5_d, filename= "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/fig_5_d_new.svg", height = 2, width = 3, units="in", dpi=1000)
+
+```
+
+```{r}
+opro_ratio_to_no_drug_mean <- read_tsv("input/opro_ratio_to_no_drug_mean.txt")
+
+names(opro_ratio_to_no_drug_mean)
+mean_opro_ratio_to_no_drug_mean<- opro_ratio_to_no_drug_mean %>% group_by(line, con) %>% summarise(mean=mean(ratio), se=(sd(ratio)/sqrt(length(ratio))))
+
+fig_5_d_new_2<-mean_opro_ratio_to_no_drug_mean %>% ggplot(aes(x=as.factor(con), y= mean, group=line, color=line), color=0.1)+geom_line()+geom_point()+theme_su()+scale_color_nejm(name="hiPSC Line", labels=c("ARID1A-HET"=expression(paste("ARID1A" ^"+/-")),"ARID1A-WT"=expression(paste("ARID1A" ^"+/+")))) +xlab(expression(paste("Concentration (μM)")))+ylab("Ratio to no-drug control")+ggtitle(expression(paste("Oprozomib Treatment Response")))+geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=0.5)
+fig_5_d_new_2
+
+
+ggsave(fig_5_d_new_2, filename= "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/fig_5_d_new_2.svg", height = 2, width = 3, units="in", dpi=1000)
+
+
+
+
+```
+
+
+## we compared cell confluency with MTS assay also
+
+```{r}
+
+mts<- read_tsv(file="E:/Paper writing/CRIPSRi paper/Analyses/Dolcetto_screen_analyses/publication/publication_final/input/oprozomib_MTS_assay.txt")
+mts_melted<- melt(mts, id.vars = "well")
+
+mts$WT<- (mts$WT_op+mts$WT_op_1)/(mts$WT_no+mts$WT_no_1)
+mts$HET<- (mts$Het_Op+mts$Het_Op_1)/(mts$Het_no+mts$Het_no_1)
+mts_melted <- mts %>% select(well, WT, HET) %>% melt(id.vars = "well")
+supp_fig_5_d<-mts_melted %>% ggplot(aes(x=variable, y=value, fill=variable))+geom_boxplot(outlier.shape = NA)+theme_su()+scale_fill_npg(name="hiPSC Line", labels=c("HET"=expression(paste("ARID1A" ^"+/-")),"WT"=expression(paste("ARID1A" ^"+/+"))))+ggtitle("Oprozomib Effect\nMTS Assay")+theme(axis.text.x = element_blank(), axis.title.x = element_blank())+ylab("Ratio to no-drug control")+stat_compare_means()+ylim(0.1,0.3)
+supp_fig_5_d
+
+ggsave(supp_fig_5_d, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/supp_fig_5_d.svg", width = 3.5, height=3, units="in", dpi=1000)
+
+```
+
+## then we targeted ARID1A in WT cells and applied oprozomib to see its effect on ARID1A silencing
+```{r}
+names(opro_ratio_to_no_drug_raw)
+a<- opro_ratio_to_no_drug_raw %>% group_by(sample, conc) %>% summarise(mean=mean(ratio), se=(sd(ratio)/sqrt(length(ratio))))
+
+a %>% ggplot(aes(x=as.factor(conc), y= mean, group=sample, color=sample))+geom_line()+geom_point()+theme_su()+scale_color_nejm(name="hiPSC Line", labels=c("ARID1A-HET"=expression(paste("ARID1A" ^"+/-")),"ARID1A-WT"=expression(paste("ARID1A" ^"+/+")))) +xlab(expression(paste("Concentration (μM)")))+ylab("Ratio to no-drug control")+ggtitle(expression(paste("Oprozomib Treatment Response")))+geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.2,
+                 position=position_dodge(0.05))
+
+
+
+```
+

@@ -1,0 +1,211 @@
+---
+title: "Growth assays plotting"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+setwd("E:/Paper writing/CRIPSRi paper/Analyses/incucyte_data")
+library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(cowplot)
+library(svglite)
+library(reshape2)
+```
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+```
+
+
+###Growth Effect of Targeting ARID1A gene in WT cells
+
+```{r}
+arid1a_growth<- read_tsv(file="input/WT_cells_ARID1A_targeting_guides_percent_cell_growth.txt")
+melted_1<- melt(arid1a_growth, id.vars = "Elapsed")
+
+fig_6_a<-melted_1 %>% filter(variable != "Control-2") %>% droplevels() %>%  ggplot(aes(x=Elapsed, y=value, group=variable, color=variable))+geom_line()+geom_point(size=1)+ ylab("Growth Rate\n(Change in Cell Confluency-%/h)")+ xlab("Time (h)")+ ggtitle("Tiling ARID1A TSS in\nWild Type hiPS Cells")+
+  theme_su()+ scale_color_nejm(name="GuideRNA\n(Distance to TSS)",
+                               labels=c("A2"="ARID1A_1 (17bp)",
+                                        "B2"="ARID1A_1 (59bp)",
+                                        "C2"="ARID1A_1 (894bp)",
+                                        "D2"="ARID1A_1 (987bp)",
+                                        "E2"="ARID1A_1 (1160bp)",
+                                        "F2"="ARID1A_1 (1314bp)",
+                                        "Control-1"="Control",
+                                        "Control-2"="Control-2",
+                                        "uninfected"="Uninfected Cells"
+                                                                            ))
+
+fig_6_a
+
+ggsave(fig_6_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/fig_6_a.svg", width = 4, height = 3, units = "in")
+
+
+```
+
+### opro treatment to arid1a silenced cells
+single time point confluence measurement
+
+```{r}
+
+arid1a_opro<-read_tsv(file = "input/arid1a_silenced_opro_treatment_day_2_single_timepoint.txt")
+names(arid1a_opro)
+arid1a_opro<- do.call(data.frame,arid1a_opro)
+
+
+opro<- melt(arid1a_opro)
+opro_2<- dcast(opro, sample+variable~treatment)
+opro_2$ratio<- opro_2$`Oprozomib 1 µM`/opro_2$Control
+opro_3<- opro_2 %>% select(sample, variable, ratio) %>% dcast(sample~variable)
+  
+level_order<- c("A2", "F2", "B2", "C12", "HET1","WT")
+
+fig_6_b<- ggplot(opro_3, aes(x=factor(sample, level=level_order), y=Confluence, fill=sample)) + 
+  geom_bar(stat="identity", color="black", 
+           position=position_dodge()) +
+  geom_errorbar(aes(ymin=min, ymax=max), width=.2,
+                 position=position_dodge(.9))+ theme_su()+ ylab("ratio to no treatment control")+ theme(axis.title.x = element_blank(), axis.text.x=element_blank())+ggtitle("Oprozomib Effect on ARID1A Silenced hiPSC")+scale_fill_nejm(name="guide RNA",
+                                            labels=c("A2"="ARID1A_1 (17bp)",
+                                        "B2"="ARID1A_1 (59bp)",
+                                        "F2"="ARID1A_1 (1314bp)",
+                                        "C12"="Non-targeting Control",
+                                        "HET1"=expression(paste("Uninfected ARID1A" ^"+/-","Cells")),
+                                        "WT"=expression(paste("Uninfected ARID1A" ^"+/+","Cells"))
+                                                                 ))
+
+ggsave(fig_6_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_6/fig_6_b.svg", width = 4, height = 2, units="in", dpi=1000)
+
+```
+
+### cas9-dcas9 comparison
+
+```{r}
+
+comp<- read_tsv(file="input/cas9_dCas9.txt")
+names(comp)
+melt_comp<- melt(comp, id.vars = "Elapsed")
+melt_comp<- melt_comp %>% mutate(data="confluency") %>% mutate(data=case_when(
+  grepl('(Std Err Well)', variable)  ~ "sd_error",
+  TRUE ~ as.character(data)))
+melt_comp<- melt_comp %>% separate(variable, into = c("variable"), sep=" ")
+melt_comp<- melt_comp %>% separate(variable, into = c("guideRNA", "line"), sep="_")
+
+names(melt_comp)
+a<- melt_comp %>%  dcast(formula=Elapsed+guideRNA+line~data)
+a$min<- a$confluency-a$sd_error
+a$max<- a$confluency+a$sd_error
+levels(a$guideRNA)
+
+a <- a %>% mutate(guide_type=case_when(
+ guideRNA== "LV66-A" ~"multiple_target",
+ guideRNA== "LV66-B" ~"single_target",
+ guideRNA== "LV66-C" ~"single_target",
+ guideRNA== "LV66-D" ~"single_target",
+ guideRNA== "LV66-E" ~"no_target",
+ guideRNA== "LV66-F" ~"no_target"
+ 
+))
+a<-do.call(data.frame,a)
+
+fig_4_e<-a %>% ggplot(aes(x=Elapsed, y=confluency, group=guideRNA, color= guide_type))+geom_line()+geom_point(size=0.5)+facet_wrap(~line)+theme_su()+scale_color_nejm(name="GuideRNA Type")+xlab("Time (h)")+ ylab("% Confluency")+geom_vline(aes(xintercept=23, linetype="Media Change"), color="gray", alpha=0.5)+geom_vline(aes(xintercept=65, linetype="Media Change"), color="gray", alpha=0.5)
+
+fig_4_e<- annotate_figure(fig_4_e, top=text_grob("DNA Cutting Effect on Cell Growth", size=8))
+fig_4_e
+
+ggsave(fig_4_e, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_e.svg", width = 4, height = 2.5, units="in", dpi=1000)
+
+  
+
+
+```
+
+## kolf growth
+```{r}
+growth<- read_tsv(file="input/WT_het1_growth.txt")
+growth<- growth[,2:6]
+names(growth)
+wt<- growth %>% select(Time=Elapsed, Confluence=KOLF2C1_WT, SE=SE_KOLF2C1_WT) %>% mutate(line="ARID1A-WT") 
+het<- growth %>% select(Time=Elapsed, Confluence=KOLF2C1_ARID1A_HET1, SE=SE_KOLF2C1_ARID1A_HET1)%>% mutate(line="ARID1A-HET1")
+
+growth_2<- rbind(wt,het)
+
+
+
+```
+
+
+
+```{r}
+fig_5_c<-growth_2 %>% ggplot(aes(x=Time, y=Confluence, group=line, color=line)) + 
+  geom_line() +
+  geom_point(size=1)+
+  geom_errorbar(aes(ymin=Confluence-SE, ymax=Confluence+SE), width=.2,
+                 position=position_dodge(0.05))+theme_su()+ylab("Confluence Ratio to T=0")+xlab("Time (h)")+scale_color_aaas(name="hiPSC Genotype", labels=c("ARID1A-HET1"=expression(paste("ARID1A" ^"+/-")),
+          "ARID1A-WT"=expression(paste("ARID1A" ^"+/+"))))+ggtitle("Effect of ARID1A genotype on hiPSC Growth")
+
+
+fig_5_c
+ggsave(fig_5_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/Fig_5_c.svg", width = 3, height = 1.5, units = "in", dpi=1000)
+ggsave(fig_5_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/Fig_5_c_larger.svg", width = 4, height = 2, units = "in", dpi=1000)
+
+ggsave(fig_5_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_5/Fig_5_c_larger.jpg", width = 4, height = 2, units = "in", dpi=1000)
+
+
+```
+
