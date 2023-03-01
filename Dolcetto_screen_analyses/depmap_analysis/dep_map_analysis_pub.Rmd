@@ -1,0 +1,299 @@
+---
+title: "ARID1A DepMap data Analysis"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+
+
+```{r}
+library(tidyverse)
+library(reshape2)
+library(ggbiplot)
+library(scales)
+library(svglite)
+library(factoextra)
+library(ggsci)
+library(Rtsne)
+library(ggrepel)
+library(ggpubr)
+
+
+```
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+```
+
+
+### data acquisition and cleaning
+Depmap data and cell lines data are downloaded from depmap database (December, 2021)
+
+```{r}
+arid1a_mutations<- read.csv(file="input/ARID1A mutations.csv")
+print(paste("there are", nrow(arid1a_mutations), "mutations in ARID1A gene",length(unique(arid1a_mutations$Depmap.Id)), "lines reported in Depmap database "))
+
+table(arid1a_mutations[,11:12])
+```
+
+
+```{r}
+CCLE_mutations <- read.csv("input/CCLE_mutations.csv")
+
+print(paste("there are", nrow(CCLE_mutations), "mutations in ",length(unique(CCLE_mutations$DepMap_ID)), "lines reported in Depmap database "))
+```
+#I removed silent mutations
+```{r}
+arid1a_mutations_damaging<- arid1a_mutations %>% filter(Variant.Annotation !="silent") %>% droplevels()
+print(paste("there are", nrow(arid1a_mutations_damaging), "damaging mutations in ARID1A gene",length(unique(arid1a_mutations_damaging$Depmap.Id)), "lines reported in Depmap database "))
+```
+
+```{r}
+CCLE_mutations_damaging<- CCLE_mutations %>% filter(isDeleterious =="True") %>% droplevels()
+print(paste("there are", nrow(CCLE_mutations_damaging), "damaging mutations in",length(unique(CCLE_mutations_damaging$DepMap_ID)), "lines reported in Depmap database and in", length(unique(CCLE_mutations_damaging$Hugo_Symbol)), "Genes"))
+
+```
+
+
+```{r}
+number_of_mutations_per_line<- as.data.frame(table(CCLE_mutations_damaging$DepMap_ID))
+lines_with_arid1a_mutattion<- CCLE_mutations_damaging %>% filter(Hugo_Symbol=="ARID1A") %>% select(DepMap_ID) %>% unique()
+
+lines_with_p53_mutation<- CCLE_mutations_damaging %>% filter(Hugo_Symbol=="TP53") %>% select(DepMap_ID) %>% unique()
+
+a<- as.data.frame(table(CCLE_mutations_damaging[,c("Hugo_Symbol", "DepMap_ID")]))
+a<- a %>% filter(Freq!=0)
+b<- as.data.frame(table(a$Hugo_Symbol))
+b %>% ggplot(aes(y=Freq)) +geom_boxplot()
+b<-b %>% filter(Var1!="TTN") %>% droplevels()
+
+b$label <- paste(b$Var1, b$Freq, sep= "-")
+
+sup.fig.8A<-b %>% ggplot(aes(y=log(Freq,10),x=1))+
+  geom_boxplot(fill="lightblue", outlier.size = 0.5)+
+  geom_label_repel(data=(b %>% filter(Freq>150)), aes(label=label),min.segment.length = 0, size=2, nudge_x = T)+
+  theme(legend.position="none")+ylab("Number of mutated cell lines (Log2)")+theme_su()+theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.line.x = element_blank(), axis.ticks.x = element_blank())
+sup.fig.8A
+
+ggsave(sup.fig.8A,filename ="output/sup_fig_8A.svg", width = 2, height = 2, units = "in", dpi=1000 )
+
+
+number_of_mutations_per_line<- number_of_mutations_per_line %>% mutate(status=case_when(
+  Var1 %in% lines_with_arid1a_mutattion$DepMap_ID ~"ARID1A",
+  TRUE ~"Other"
+))
+
+
+number_of_mutations_per_line<- number_of_mutations_per_line %>% mutate(status_2=case_when(
+  Var1 %in% lines_with_arid1a_mutattion$DepMap_ID ~"ARID1A",
+  Var1 %in% lines_with_p53_mutation$DepMap_ID~ "P53",
+  TRUE ~"Other"
+))
+
+number_of_mutations_per_line<- number_of_mutations_per_line %>% mutate(status_3=case_when(
+  Var1 %in% lines_with_arid1a_mutattion$DepMap_ID &Var1 %in% lines_with_p53_mutation$DepMap_ID ~"Both",
+  Var1 %in% lines_with_arid1a_mutattion$DepMap_ID ~"ARID1A",
+  Var1 %in% lines_with_p53_mutation$DepMap_ID~ "P53",
+  TRUE ~"Other"
+))
+
+number_of_mutations_per_line<- do.call("data.frame", number_of_mutations_per_line)
+table(number_of_mutations_per_line$status_3)
+
+number_of_mutations_per_line %>% ggplot(aes(x=status_3, y=Freq))+geom_boxplot()+ylab("Number of mutation per line")
+
+
+x<- CCLE_mutations_damaging %>% filter(DepMap_ID %in% lines_with_arid1a_mutattion$DepMap_ID) %>% droplevels()
+
+median(number_of_mutations_per_line$Freq)
+
+n<- number_of_mutations_per_line %>% dplyr::group_by(status) %>% dplyr::summarise(median=median(Freq))
+
+
+
+```
+
+
+
+
+arid1a is among the most mutated lines.
+check how many different genes are mutated together with arid1a
+
+
+
+
+
+
+
+find no damaging mutation lines
+```{r}
+arid1a_lines_with_no_damaging_mutation<- arid1a_mutations %>% filter(!(Cell.Line %in% arid1a_mutations_damaging$Cell.Line)) %>% droplevels()
+cell_line_data<-as.data.frame(unique(arid1a_mutations$Depmap.Id))
+names(cell_line_data)<- "DepMap_ID"
+cell_line_data$mutation_type<- "Damaging"
+cell_line_data<- cell_line_data %>% mutate(mutation_type=case_when(
+  DepMap_ID %in% arid1a_lines_with_no_damaging_mutation$Depmap.Id ~"Benign",
+    TRUE ~ as.character(mutation_type)))
+```
+
+
+### import screen data
+
+```{r}
+arid1a_screens<- read.csv(file="input/arid1a_screens.csv")
+
+arid1a_screens<- left_join(arid1a_screens, cell_line_data, by="DepMap_ID")
+arid1a_screens<- arid1a_screens %>% select(1,17388, 2:17387)
+#also load data for all screens
+CRISPR_gene_effect <- read.csv("input/CRISPR_gene_effect.csv")
+
+##import DDD bagel file
+DDD_Bagel <- read.csv("input/DDD_Bagel.txt")
+```
+
+
+
+#I used bagel values because bagel is also normalizes screens according to scores of essential and non essential genes.
+
+
+```{r}
+names(DDD_Bagel)
+DDD_bagel_screen<- DDD_Bagel %>% select(Gene, WT_1, WT_2, WT_av, Mutant)
+DDD_bagel_screen<-DDD_bagel_screen %>% mutate(WT_1= -1*WT_1, WT_2=-1*WT_2, WT_av= -1*WT_av, Mutant= -1* Mutant )
+rownames(DDD_bagel_screen)<- DDD_bagel_screen$Gene
+DDD_long<- as.data.frame(t(DDD_bagel_screen[,2:5]))
+
+```
+##combine screen data with ddd data
+
+```{r}
+c<- colnames(CRISPR_gene_effect)
+c<- gsub(pattern = "\\..*", replacement = "",c)
+names(CRISPR_gene_effect)<- c
+DDD_long$DepMap_ID<- rownames(DDD_long)
+t<- intersect(names(DDD_long),c)
+
+##only 16626 genes are shared between data sets
+
+m<- rbind(CRISPR_gene_effect[,t], DDD_long[,t])
+names(m)[1]
+rownames(m)<- m$DepMap_ID
+m<- m %>% mutate(screen_type="Other") %>% mutate(case_when(
+    DepMap_ID %in% DDD_long$DepMap_ID ~ "in_house",
+  DepMap_ID %in% lines_with_arid1a_mutattion ~"Depmap_ARID1A",
+  TRUE ~ as.character(screen_type)))
+all_screen_data<-m
+```
+
+
+```{r}
+n<- as.data.frame(t(m[1:16628]))
+
+```
+
+##Correlation plot
+```{r}
+cormat<- round(cor(n, method = "pearson"),3)
+
+
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+
+
+a<- melted_cormat %>% filter((Var1 %in% c("WT_av", "Mutant"))&!(Var2 %in% c("WT_av", "Mutant", "WT_1","WT_2"))) %>% droplevels()
+b<-as.data.frame(acast(a, Var2~Var1))
+b %>% ggplot(aes(x=WT_av, y=Mutant))+geom_point()+geom_abline()
+library(ggpubr)
+
+
+a<- a %>% mutate(screen_type="Other") %>% mutate(screen_type=case_when(
+    Var2 %in% lines_with_arid1a_mutattion$DepMap_ID ~"Depmap_ARID1A",
+  TRUE ~ as.character(screen_type)))
+
+correlations<- a
+sup.fig.8C<-correlations %>% ggplot(aes(y=value, x=Var1))+geom_boxplot(outlier.shape =NA)+stat_compare_means(label="..p.signif..", label.y = 0.67)+theme_su()+ggtitle("Correlation between in house screens to all Depmap screens")+ xlab("in house screens")+ylab("Pearson Correlation")+ylim(0.5,0.7)
+sup.fig.8C
+
+ggsave(sup.fig.8C, filename = "output/sup_fig_8C.svg", width = 2.5, height = 2.5, units = "in", dpi=1000)
+
+sup.fig.8D<-correlations %>% ggplot(aes(y=value, x=Var1, fill=screen_type))+geom_boxplot(outlier.shape = NA)+stat_compare_means(label="..p.signif..", size=2, label.y = 0.67)+theme_su()+ scale_fill_npg(name="Depmap Screen Type")+ ggtitle("Comparison of in-house screens to Depmap screens")+xlab("In-house screens")+ylab("Pearson correlations")+ylim(0.5,0.7)
+sup.fig.8D
+
+ggsave(sup.fig.8D, filename = "output/sup_fig_8D.svg", width = 4, height = 2.5, units = "in", dpi=1000)
+
+```
+
+
+###PCA analysis
+```{r}
+all_screen_data<- na.omit(all_screen_data)
+depmap_screens_only<- CRISPR_gene_effect[,t] %>% na.omit()
+
+head(depmap_screens_only)
+
+depmap_screens_only<-depmap_screens_only %>% mutate(screen_type="Other") %>% mutate(screen_type=case_when(
+  DepMap_ID %in% lines_with_arid1a_mutattion$DepMap_ID ~"Depmap_ARID1A",
+  TRUE ~ as.character(screen_type)))
+
+
+depmap.pca<- prcomp(depmap_screens_only[,1:16628], center = T, scale. = T)
+library(ggfortify)
+p1<-autoplot(depmap.pca, data = depmap_screens_only, colour = 'screen_type', size=0.1)
+sup.fig.8B<- p1+theme_su()+scale_color_nejm()
+sup.fig.8B
+ggsave(sup.fig.8B, file="output/sup.fig.8B.svg", width=4, height = 2.5, units = "in", dpi=1000)
+
+```

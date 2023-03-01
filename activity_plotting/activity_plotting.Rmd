@@ -1,0 +1,111 @@
+---
+title: "activity_plotting"
+author: "Sunay"
+date: '2022-05-20'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggsci)
+library(tidyverse)
+
+```
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+```
+
+## read in results of all activity tests
+Activity test is conducted using a reporter plasmid expressing GFP and BFP from different promoters and as well as a gRNA targeting GFP promoter (or a mock gRNA). The activity is determined as ercent decrease in median GFP signal in BFP positive cells transfected with the targeting gRNA compared to cells transfected with non-targeting (mock) gRNA. 
+```{r}
+
+all_activity_data<- read_csv(file="input/all_activity.txt")
+names(all_activity_data)
+
+summary<- all_activity_data %>% group_by(Clonality, Construct, Line) %>% summarise(Mean=mean(Activity),Median=median(Activity), Sd=sd(Activity))
+write_csv(summary, file="input/activity_summary.txt")
+
+summary %>% ggplot(aes(x=Line, fill=Construct, y=Mean))+ geom_bar(stat="identity", color="black", 
+           position=position_dodge()) +
+  geom_errorbar(aes(ymin=Mean-Sd, ymax=Mean+Sd), width=.2,
+                 position=position_dodge(.9)) +facet_wrap(~Clonality)
+
+all_activity_data<- all_activity_data %>% unite("Cons", Clonality:Construct, remove = F)
+
+ipsc_activity<- all_activity_data %>% filter(Line=="hIPSC") %>% droplevels()
+
+
+figure_1_b<- ipsc_activity %>% ggplot(aes(x=Cons, y=Activity, fill=Construct, linetype=Clonality))+geom_boxplot()+theme_su()+theme(axis.text.x = element_blank(), legend.position = "none")+ylab("Percent dCas9 Activity")+ggtitle("dCas9 Activity in hIPSC Cells")+xlab("Cell Lines")+scale_fill_nejm(name="Cell Lines")
+figure_1_b
+
+svg(filename= "./plots/figure_1_b.svg", width = 3, height = 2)
+plot(figure_1_b)
+dev.off()
+
+figure2<- all_activity_data %>% ggplot(aes(x= Cons, y=Activity, fill=Line))+geom_boxplot()+theme_su()+theme(axis.text.x = element_text(angle=90), axis.title = element_text(face="bold"))+scale_fill_nejm(name="Cell Line")+xlab("dCas9 fusion constructs")+ggtitle("Activity of dCas9 Fusion Proteins in hiPSC and K562 Lines")
+figure2
+
+svg(filename= "./plots/supplementary_figure_1.svg", height = 5, width = 10)
+plot(figure2)
+dev.off()
+ggsave(figure2, filename= "./plots/supplementary_figure_1.jpeg", dpi=1000, width = 10, height = 5, units = "cm")
+
+```
+
+

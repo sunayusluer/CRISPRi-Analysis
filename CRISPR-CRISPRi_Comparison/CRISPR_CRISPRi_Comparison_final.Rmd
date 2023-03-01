@@ -1,0 +1,421 @@
+---
+title: "CRISPR_Cut and CRISPR_inhibition comparison"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+setwd("E:/Paper writing/CRIPSRi paper/Analyses/CRISPR-CRISPRi_Comparison/pub_final")
+library(tidyverse)
+library(ggpubr)
+library(ggrepel)
+library(ggsci)
+library(ggExtra)
+library(cowplot)
+library(svglite)
+library(reshape2)
+
+```
+
+##Here I compared CRISPRi screens with CRISPR screens in hIPSCI-Fiaj1 cell line
+# I used gene mean LFC for CRIPRi results, for CRISPR I used gene mean adjusted calculated LFC as reported in PEets et al, 2019
+I retrieved TSS annotation from Fantom database (calculated before for this paper) and picked top TSS for IPSC
+I retrieved gRNA locations for Dolcetto A library from:  https://portals.broadinstitute.org/gpp/public/pool/details?pool=CP0055
+
+CP0055_9606_GRCh38_20181031_ontarget.bed file, it has 187507 entries since some guides target more than one region in genome. I assigned this guides as non unique in remaining analysis and did not include them in any analysis requiring TSS annotation or guide RNA locus info.
+for gene mean LFC file if either of 3 guides for a gene is non-unique, I labeled that gene as non-unique.
+distance to TSS is calculated as distange of PAM site to TSS and exact location of guide RNA spans either - and + 20bp of this location depending on which strand the guide is.
+merged annotated file is the result of these analysis.
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+```
+
+
+```{r}
+merged_annotated <- read.csv("input/merged_annotated.txt")
+```
+
+
+```{r}
+names(merged_annotated)
+
+
+```
+
+
+
+
+
+```{r}
+scatter1<- ggplot()+
+  geom_point(data=(merged_annotated %>% filter(Annot=="Other") %>% droplevels()), aes(x=IPSC_Av_Cut, y= IPSC_AV_inh, color="Other"),size=0.05, alpha=0.5)+
+  geom_point(data=(merged_annotated %>% filter(Annot=="CEG") %>% droplevels()), aes(x=IPSC_Av_Cut, y= IPSC_AV_inh, color="CEG"),size=0.05, alpha=0.5)+
+  geom_point(data=(merged_annotated %>% filter(Annot=="NEG") %>% droplevels()), aes(x=IPSC_Av_Cut, y= IPSC_AV_inh, color="NEG"),size=0.05, alpha=0.5)+
+ggtitle("Comparison of CRISPR and CRISPR-inhibition screens in hIPSC Cells")+ xlab("CRISPR Gene Average Log2 Fold Change")+ylab("CRISPR-inhibition Gene Average Log2 Fold Change")+theme_su()+ scale_color_nejm(name="Gene Function",                                                               labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "Non-targeting_control"="Control", "Other"="Other Genes"))+theme(legend.position = "bottom")
+
+  
+scatter1<- scatter1+ stat_cor(data=merged_annotated, aes(x=IPSC_Av_Cut, y= IPSC_AV_inh, label = ..r.label..), inherit.aes = F, size=2)
+
+xdens <- axis_canvas(scatter1, axis = "x")+
+  geom_density(data = merged_annotated, aes(x = IPSC_Av_Cut, fill = Annot),
+              alpha = 0.7, size = 0.2)+
+ scale_fill_nejm()
+xdens
+ydens <- axis_canvas(scatter1, axis = "y", coord_flip = T)+
+  geom_density(data = merged_annotated, aes(x = IPSC_AV_inh, fill = Annot),
+              alpha = 0.7, size = 0.2)+
+ scale_fill_nejm()+coord_flip()
+ydens
+
+p1 <- insert_xaxis_grob(scatter1, xdens, grid::unit(.2, "null"), position = "top")
+p2<- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
+fig_4_a<- ggdraw(p2)
+fig_4_a
+
+ggsave(fig_4_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_a.svg", width = 4, height = 3.5, units = "in", dpi=1000)
+
+
+```
+
+
+
+### Chromosome Type Effect:
+
+
+```{r}
+names(merged_annotated)
+
+
+a<- merged_annotated %>% filter(chr_type!="Non-unique") %>% droplevels() %>% select(IPSC_Av_Cut, IPSC_AV_inh,chr_type) %>% melt()
+
+fig_4_b<-a %>% ggplot(aes(x=chr_type, y=value, fill=variable))+geom_boxplot(outlier.shape = NA)+theme_su()+xlab("Chromosome Type")+ylab("Gene Mean Log2 Fold Change")+scale_fill_npg(name="Screen Type")+geom_hline(yintercept = 0, linetype="dashed", color="gray")+ylim(-2,1.5)
+fig_4_b
+
+
+ggsave(fig_4_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_b.svg", width = 4, height = 2, units = "in", dpi=1000)
+
+
+
+```
+
+### Effect of bidirectional promoters
+```{r}
+
+bidirectional_genes<- merged_annotated %>% filter(bidirectional=="<1000") %>% arrange(chr,tss_start)
+print(paste("There are",nrow(bidirectional_genes), "gene pairs with less than 1000bp distance between promoters"))
+
+## identify gene pairs
+
+
+ 
+bidirectional_genes <- bidirectional_genes %>% mutate(neighbourgene=
+  if_else(distance_to_neighbour_TSS == lead(distance_to_neighbour_TSS), lead(Gene), lag(Gene)))
+
+bidirectional_genes<- bidirectional_genes %>% select(Gene, neighbourgene, chr, tss_start, distance_to_neighbour_TSS, IPSC_AV_inh,IPSC_Av_Cut, distance_to_neighbour_TSS, TSS_distance)
+c<- bidirectional_genes %>% select(neighbourgene=Gene, neigh_IPSC_Av_Cut=IPSC_Av_Cut, neigh_IPSC_AV_inh=IPSC_AV_inh)
+bidirectional_genes<- inner_join(bidirectional_genes,c, by="neighbourgene")
+
+# select every second row to have only one copy of pairs
+bidirectional_genes<- bidirectional_genes[seq(1, nrow(bidirectional_genes), 2), ]
+
+## there are 971 gene pairs with bidirectional promoters
+
+crispri_bidirectional_scatter<- bidirectional_genes %>% ggplot(aes(x=IPSC_AV_inh, y=neigh_IPSC_AV_inh, color=distance_to_neighbour_TSS))+geom_point(alpha=0.6)+stat_cor(aes(label=paste(..r..)), size=3)+ scale_color_gradient(name="Distance between \nneighboring TSS",low = "darkblue", high = "red")+theme_su()+xlab("Gene Pair 1")+ylab("Gene Pair 2")+ ggtitle("CRISPR-Inhibition")+theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+  
+
+
+crispr_bidirectional_scatter<- bidirectional_genes %>% ggplot(aes(x=IPSC_Av_Cut, y=neigh_IPSC_Av_Cut, color=distance_to_neighbour_TSS))+geom_point(alpha=0.6)+stat_cor(aes(label=paste(..r..)), size=3)+ scale_color_gradient(name="Distance between \nneighboring TSS",low = "darkblue", high = "red")+theme_su()+xlab("Gene Pair 1")+ylab("Gene Pair 2")+ ggtitle("CRISPR")+theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+  
+
+fig_4_d<-ggarrange(crispr_bidirectional_scatter, crispri_bidirectional_scatter, common.legend = T, legend = "right", ncol=1)
+fig_4_d<-annotate_figure(fig_4_d,
+                left = text_grob("Gene Pair 2", rot = 90, size=6), bottom=text_grob("Gene Pair 1", size=6), top = text_grob("Correlation Between Bidirectional Gene Pairs", size=8))
+fig_4_d
+
+ggsave(fig_4_d, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_d.svg", width = 3, height = 3, units = "in", dpi=1000)
+
+```
+
+### effect of unique gene annotation
+some guides in Dolcetto library targets more than one loci on the genome. If a gene has at least one non-specific guide RNA, I labelled that gene as non-unique. I considered non-unique genes as the one with high level of homology within human genome. I compared depletion of non essential genes in unique and non-unique sets.
+
+```{r}
+print(paste(nrow(merged_annotated), "genes are involved in this stuy/ only",nrow(merged_annotated %>% filter(Unique=="Unique")), "are unique"))
+
+```
+
+I selected non-essential genes, filtered out genes with bidirectional promoters 
+```{r}
+non_essentials<- merged_annotated %>% filter(Annot=="NEG") %>% filter(is.na(bidirectional)) %>% select(Gene, IPSC_Av_Cut, IPSC_AV_inh, Unique, Annot)
+
+nones_1<-non_essentials %>% ggplot(aes(y=IPSC_Av_Cut, x=Unique, fill=Unique))+geom_boxplot(outlier.shape = NA)+stat_compare_means(size=3, label.y=2.5)+theme_su()+scale_fill_aaas(name="Gene Set Within \nNon-Essential Genes", labels=c("Non-unique"="Non-uniques (n=345)", "Unique"="Unique (n=530)"))+ggtitle("CRISPR")+theme(axis.title = element_blank(), axis.text.x = element_blank())+ylim(-5,3)
+
+
+
+nones_2<-non_essentials %>% ggplot(aes(y=IPSC_AV_inh,x=Unique, fill=Unique))+geom_boxplot(outlier.shape = NA)+stat_compare_means(size=3, label.y=2.5)+
+  theme_su()+scale_fill_aaas(name="Gene Set Within \nNon-Essential Genes", labels=c("Non-unique"="Non-uniques (n=345)", "Unique"="Unique (n=530)"))+ggtitle("CRISPR-Inhibition")+theme(axis.title = element_blank(), axis.text.x = element_blank())+ylim(-5,3)
+sup_fig_4_a<- ggarrange(nones_1, nones_2, nrow=1, common.legend = T, legend = "bottom")
+
+
+sup_fig_4_a<-annotate_figure(sup_fig_4_a, top = text_grob("Specificity effect in CRISPR vs CRISPR-Inhibition", size=8), left = text_grob("Gene Mean Log2 Fold Change",rot=90, size=6))
+sup_fig_4_a
+
+ggsave(sup_fig_4_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/sup_fig_4_a.svg", width = 4, height = 4, units = "in", dpi=1000)
+
+
+```
+
+### non-unique effect for crispr
+```{r}
+
+crispr_specific<- merged_annotated %>%  filter(Annot=="NEG") %>% filter(crispr_off_target!="no_data") %>%  ggplot(aes(y=IPSC_Av_Cut, x=crispr_off_target, fill=crispr_off_target))+geom_boxplot(outlier.shape = NA)+stat_compare_means(size=3, label.y=1.9)+ theme_su()+ scale_fill_npg(name="Specificity of \ntargeting guides")+theme(axis.title = element_blank(), axis.text.x = element_blank())+ggtitle("CRISPR")+ylim(-1.5,2)
+crispr_specific
+  
+  
+crispri_unique<-
+merged_annotated %>%  filter(Annot=="NEG")  %>% filter(is.na(bidirectional)) %>%  ggplot(aes(y=IPSC_AV_inh, x=Unique, fill=Unique))+geom_boxplot(outlier.shape = NA)+stat_compare_means(size=3, label.y = 1.9)+ theme_su()+ scale_fill_npg(name="Specificity of \ntargeting guides", labels=(c("Non-unique"="Non-Specific", "Unique"="Specific")))+theme(axis.title = element_blank(), axis.text.x = element_blank())+ggtitle("CRISPR-Inhibition")+ylim(-1.5,2)
+
+sup_fig_4_b<- ggarrange(crispr_specific, crispri_unique, common.legend = T, legend = "bottom")
+sup_fig_4_b<- annotate_figure(sup_fig_4_b, left=text_grob("Gene Mean Log2 Fold Change", size=6, rot=90), top = text_grob("Guide-RNA Specificity Effect", size=8, face="bold"))
+sup_fig_4_b
+
+ggsave(sup_fig_4_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/sup_fig_4_b.svg", width = 4, height = 4, units = "in", dpi=1000)
+
+
+
+
+fig_4_c<- merged_annotated %>% filter(IPSC_AV_inh > -0.4 & IPSC_AV_inh< 0.4 ) %>% filter(crispr_off_target != "no_data") %>%  ggplot(aes(y=IPSC_Av_Cut, x=crispr_off_target, fill=crispr_off_target))+geom_boxplot(outlier.shape = NA)+stat_compare_means(size=3)+ scale_fill_npg(name="Specificity of \ntarget guides")+theme_su()+ ylab("CRISPR\nGene Mean LFC")+ theme(axis.title.x = element_blank())+ggtitle("Guide Specificity Effect of CRISPR\n(Genes with No Survival Effect on CRISPRi Screen)")
+fig_4_c
+
+ggsave(fig_4_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_c.svg", width = 3.5, height = 3, units = "in",dpi=1000)
+
+```
+
+
+###compare replicates
+```{r}
+names(merged_annotated)
+inh_replicates<-
+ggplot()+
+  geom_point(data=(merged_annotated %>% filter(Annot=="Other")),aes(x=IPSC_1_inh, y=IPSC_2_inh, color=Annot), size=0.5)+
+  geom_point(data=(merged_annotated %>% filter(Annot=="NEG")),aes(x=IPSC_1_inh, y=IPSC_2_inh,color=Annot), size=0.5)+
+  geom_point(data=(merged_annotated%>% filter(Annot=="CEG")),aes(x=IPSC_1_inh, y=IPSC_2_inh,color=Annot), size=0.5)+
+  stat_cor(data=merged_annotated, inherit.aes = F, aes(x=IPSC_1_inh, y=IPSC_2_inh,label = ..r.label..), method = "pearson", size=2)+
+  ggtitle("CRISPR-Inhibition")+
+  theme_su()+
+  scale_color_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes"))+theme(axis.title = element_blank())+ geom_label_repel(data=(merged_annotated %>% filter(Gene %in% c("TP53", "PMAIP1"))), aes(x=IPSC_1_inh, y=IPSC_2_inh,color=Annot, label=Gene))
+inh_replicates
+
+
+
+cut_replicates<- ggplot()+
+  geom_point(data=(merged_annotated %>% filter(Annot=="Other")),aes(x=iPSC_1_cut, y=iPSC_2_cut, color=Annot), size=0.5)+
+  geom_point(data=(merged_annotated %>% filter(Annot=="NEG")),aes(x=iPSC_1_cut, y=iPSC_2_cut,color=Annot), size=0.5)+
+  geom_point(data=(merged_annotated%>% filter(Annot=="CEG")),aes(x=iPSC_1_cut, y=iPSC_2_cut,color=Annot), size=0.5)+
+  stat_cor(data=merged_annotated, inherit.aes = F, aes(x=iPSC_1_cut, y=iPSC_2_cut,label = ..r.label..), method = "pearson", size=2)+
+  ggtitle("CRISPR-Cut")+
+  theme_su()+
+  scale_color_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes"))+theme(axis.title = element_blank())+ geom_label_repel(data=(merged_annotated %>% filter(Gene %in% c("TP53", "PMAIP1"))), aes(x=iPSC_1_cut, y=iPSC_2_cut,color=Annot, label=Gene))
+cut_replicates
+
+sup_fig_4_c<- ggarrange(inh_replicates, cut_replicates, nrow=1, common.legend = T, legend = "bottom")
+
+sup_fig_4_c<- annotate_figure(sup_fig_4_c, top=text_grob("Replicate Correlation\nCRISPR-Inhibition vs CRISPR Cut", size=8, face="bold"), bottom = text_grob("Gene Mean Log2 Fold Change", size=6,), left=text_grob("Gene Mean Log2 Fold Change", size=6, rot=90))
+sup_fig_4_c
+
+ggsave(sup_fig_4_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/sup_fig_4_c.svg", width = 4, height = 3, units = "in", dpi=1000)
+
+
+
+```
+
+###compare depletion pattern
+
+```{r}
+crispri_guide_LFC<- read_csv(file="input/crispri_guide_lfc.txt")
+names(crispri_guide_LFC)
+
+crispr_guide<- read_csv(file="input/crispr_guide_lfc.txt")
+
+crispr_guide<- do.call("data.frame",crispr_guide)
+names(crispr_guide)
+
+
+annotation<- unique(crispri_guide_LFC %>% select(Gene,func))
+
+crispr_guide <- left_join(crispr_guide, annotation, by="Gene")
+crispr_guide<- do.call(data.frame,crispr_guide)
+summary(crispr_guide$func)
+
+crispr_guide<- crispr_guide %>% mutate(func=case_when(
+  Gene=="Non-targeting_control"~ "CONTROL",
+TRUE ~ as.character(func)))
+crispr_guide<- do.call(data.frame,crispr_guide)
+summary(crispr_guide$func )
+
+crispr_guide<-crispr_guide %>% filter(!is.na(func))
+crispr_guide<- crispr_guide %>% separate(gRNA, into=c("gRNA", "library"), sep = "_")
+```
+
+
+```{r}
+mean_inh<- crispri_guide_LFC %>% select(func, IPSC_D18) %>%  group_by(func) %>% summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}_{fn}"
+  )) %>% droplevels()
+mean_cut<-crispr_guide %>% filter(library==3) %>% select(func, iPSC_LFC) %>%  group_by(func) %>% summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}_{fn}"
+  )) %>% droplevels()
+
+level_order<- c("CEG", "NEG", "Other", "CONTROL")
+
+mean_cut
+
+
+density_cut<-crispr_guide %>% filter(library==3) %>%  ggplot(aes(x=iPSC_LFC,fill=factor(func, level=level_order)))+geom_density(color="black", alpha=0.8)+
+  scale_fill_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes", "CONTROL"="Non-targeting Control"))+
+  theme_su()+
+  theme(axis.title = element_blank())+ggtitle("CRISPR-Cut ")+
+ geom_vline(aes(xintercept=0.679, linetype="Non-targeting Control"))+
+  geom_vline(aes(xintercept= -1.02, linetype="Non-Essential Genes"))+scale_linetype(name="Gene Function\nGroup Mean")
+
+density_cut
+
+
+mean_inh
+
+density_inh<-crispri_guide_LFC %>%  ggplot(aes(x=IPSC_D18,fill=factor(func, level=level_order)))+geom_density(color="black", alpha=0.8)+
+  scale_fill_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes", "CONTROL"="Non-targeting Control"))+
+  theme_su()+
+  theme(axis.title = element_blank())+ggtitle("CRISPR-Inhibition ")+
+ geom_vline(aes(xintercept=0.243, linetype="Non-targeting Control"))+
+  geom_vline(aes(xintercept= 0.129, linetype="Non-Essential Genes"))+scale_linetype(name="Gene Function\nGroup Mean")
+density_inh
+```
+
+
+```{r}
+fig_4_g<- ggarrange(density_cut, density_inh, ncol=1, common.legend = T, legend="right")
+
+fig_4_g<- annotate_figure(fig_4_g, bottom=text_grob("Guide RNA Level Log2 Fold Change", size=6), left=text_grob("Density", size=6, rot=90))
+fig_4_g
+
+ggsave(fig_4_g, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/fig_4_g.svg", width = 3.5, height = 3.5, units = "in", dpi=1000)
+
+```
+
+##depletion of K562
+
+```{r}
+K562_mean_inh<- crispri_guide_LFC %>% select(func, K562_D21) %>%  group_by(func) %>% summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}_{fn}"
+  )) %>% droplevels()
+K562_mean_cut<- crispr_guide %>% filter(library==3) %>% select(func, K562_LFC) %>%  group_by(func) %>% summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}_{fn}"
+  )) %>% droplevels()
+
+
+level_order<- c("CEG", "NEG", "Other", "CONTROL")
+
+K562_mean_cut
+
+
+k562_density_cut<-crispr_guide %>% filter(library==3) %>%  ggplot(aes(x=K562_LFC,fill=factor(func, level=level_order)))+geom_density(color="black", alpha=0.8)+
+  scale_fill_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes", "CONTROL"="Non-targeting Control"))+
+  theme_su()+
+  theme(axis.title = element_blank())+ggtitle("CRISPR-Cut (K562) ")+
+ geom_vline(aes(xintercept=0.0761, linetype="Non-targeting Control"))+
+  geom_vline(aes(xintercept= -0.340, linetype="Non-Essential Genes"))+scale_linetype(name="Gene Function\nGroup Mean")
+
+k562_density_cut
+
+
+K562_mean_inh
+
+K562_density_inh<-crispri_guide_LFC %>%  ggplot(aes(x=K562_D21,fill=factor(func, level=level_order)))+geom_density(color="black", alpha=0.8)+
+  scale_fill_nejm(name="Gene Function",                                                          labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes", "CONTROL"="Non-targeting Control"))+
+  theme_su()+
+  theme(axis.title = element_blank())+ggtitle("CRISPR-Inhibition (K562) ")+
+ geom_vline(aes(xintercept=0.0476, linetype="Non-targeting Control"))+
+  geom_vline(aes(xintercept= 0.0699, linetype="Non-Essential Genes"))+scale_linetype(name="Gene Function\nGroup Mean")
+K562_density_inh
+
+
+
+```
+
+```{r}
+sup_fig_4_d<- ggarrange(k562_density_cut, K562_density_inh, ncol=1, common.legend = T, legend="right")
+
+sup_fig_4_d<- annotate_figure(sup_fig_4_d, bottom=text_grob("Guide RNA Level Log2 Fold Change", size=6), left=text_grob("Density", size=6, rot=90))
+sup_fig_4_d
+
+ggsave(sup_fig_4_d, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_4/sup_fig_4_d.svg", width = 3.5, height = 3.5, units = "in",dpi=1000)
+
+
+```
+
+
+### End of analysis
+
