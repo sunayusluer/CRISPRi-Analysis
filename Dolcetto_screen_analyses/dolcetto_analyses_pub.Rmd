@@ -1,0 +1,642 @@
+---
+title: "Dolcetto Screens analyses"
+output:
+  html_document:
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
+---
+
+in following lines whole geneome CRISPRi drop-out screen was conducted using Dolcetto library
+
+Fiaj-1 dCas9-KRAB-MeCP2, Monoclone Q2.2
+
+Fiaj-1 dCas9-KRAB-MeCP2,Polyclone
+
+Kolf2-ARID1A-KO-WT-dCas9-KRAB-MeCP2,M2
+
+Kolf2-ARID1A-KO-WT-dCas9-KRAB-MeCP2,M5
+
+Kolf2-ARID1A-KO-Het1-dCas9-KRAB-MeCP2,M5
+
+K562-dCas9-KRAB-MeCP2, Monoclone
+
+also CRISPRi screens are compared to CRISPR screens in Fiaj1 line (Peets et al, 2019)
+Rosetta file contains all data to relate screen numbers to relevant metadata
+
+### Analysis of Dolcetto Library
+Dolcetto library reference is downloaded from website of Broad Institute Genetic Perturbation Platform: https://portals.broadinstitute.org/gpp/public/resources/protocols
+
+annotations are according to GCHR38
+```{r}
+setwd("E:/Paper writing/CRIPSRi paper/Analyses/Dolcetto_screen_analyses/publication/publication_final")
+library(tidyverse)
+library(ggsci)
+library(reshape2)
+library(ineq)
+library(ggpubr)
+library(cowplot)
+library(pROC)
+library(svglite)
+```
+
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+
+
+```
+
+
+
+```{r}
+Dolcetto_reference_GCHR38 <- read.csv("input/Dolcetto_reference_GCHR38.txt")
+names(Dolcetto_reference_GCHR38)
+print(paste("there are", NROW(unique(Dolcetto_reference_GCHR38$grna_id)), "unique guides in Dolcetto Library, targeting", NROW(Dolcetto_reference_GCHR38), "regions in the genome"))
+```
+
+
+```{r}
+nTargets<- as.data.frame(table(Dolcetto_reference_GCHR38$grna_id))
+distribution_of_target_number<- as.data.frame(table(nTargets$Freq)) %>% rename("Target_number"=Var1, "Count"=Freq)
+distribution_of_target_number
+```
+
+assign target locus count to reference data
+```{r}
+nTargets<- nTargets %>% rename(grna_id=Var1, nLoci=Freq)
+
+Dolcetto_reference_GCHR38<- left_join(Dolcetto_reference_GCHR38, nTargets, by="grna_id")
+Dolcetto_reference_GCHR38<- Dolcetto_reference_GCHR38 %>% mutate(Unique= case_when(
+  nLoci >1 ~"Non_unique",
+  nLoci ==1 ~"Unique"
+))
+print(paste("There are", NROW(Dolcetto_reference_GCHR38 %>% filter(Unique=="Unique")),"unique guides in Dolcetto Library and", NROW(unique(Dolcetto_reference_GCHR38 %>% filter(Unique=="Non_unique") %>% select(grna_id))),"guides targets more than one locus"))
+```
+
+##Dolcetto Screen Analysis
+fastq files are aligned to reference library with 19bp guide sequence and occurences are counted
+following file contains guide sequences, gene name, annotation of guide according to Hart essential and non-essential gene sets and read counts for each screens.
+some screens has 2 and some other has 4 technical replicates, and also most of the screens has 2 biological replicates. they are analysed as separately and all reads of technical replicates are summed for each screen.
+also there are 3 time points sequenced for all of the screens
+
+```{r}
+
+all_dolcetto_reads_curated<-read_tsv( file="input/all_dolcetto_curated_reads.txt")
+names(all_dolcetto_reads_curated)
+all_dolcetto_reads_curated<- do.call("data.frame", all_dolcetto_reads_curated)
+
+```
+
+calculate coverage for each screen:
+
+```{r}
+summary<- as.data.frame(summary(all_dolcetto_reads_curated[4:106])) %>% separate(Freq, sep=":", into=c("Variable","Value" )) %>% select(Screen=Var2, Variable, Value)
+library(reshape2)
+summary<- as.data.frame(summary %>% acast(Screen~Variable))
+summary$screens<- rownames(summary)
+summary<- do.call(data.frame, summary)
+summary$screens<- as.factor(summary$screens)
+write_csv(summary, file = "output/supplemantary_table_screen_raw_Reads_summanry.txt")
+
+summary
+```
+
+
+```{r}
+a<- melt(all_dolcetto_reads_curated,id.vars = 1:3,measure.vars = 4:106)
+a %>% ggplot(aes(y=value, x=variable, color=variable)) + geom_boxplot()+theme(legend.position = "none", axis.text.x =element_text(angle=90))
+
+```
+
+
+```{r}
+column_sum<-as.data.frame(colSums(all_dolcetto_reads_curated[,4:106])) 
+column_sum<- column_sum %>% mutate(screens= rownames(column_sum)) %>% mutate(coverage=round((column_sum[,1]/57042),0))
+coverage<- column_sum %>% select(2,3)
+coverage<- do.call(data.frame, coverage)
+references<- c("DOL.1", "DOL.2","DOL.3","DOL.V2", "DOLCETTO", "Dol.V3","DOL_V3_1","DOL_V3_2", "DOL_V3_3")
+
+     
+levels(coverage$screens)
+a<- coverage %>% filter(!(screens %in% references))
+a<- a %>% mutate(new=screens)
+a<- a %>% separate(new, sep="_D", into=c("screen_name", "Time_Point"))
+a<- do.call("data.frame",a)
+
+levels(a$Time_Point)
+
+a<- a %>% mutate(TP=case_when(
+  Time_Point %in% c(3,4,5)~ "TP0",
+  Time_Point %in% c(9,10,11)~ "TP1",
+  Time_Point %in% c(13,14,15)~ "TP2",
+  Time_Point %in% c(18,21,22)~ "TP3"))
+coverage<- left_join(coverage,a, by="screens")
+coverage<- coverage %>% mutate(screen_name=case_when(
+  screens %in% references  ~"Reference",
+  TRUE ~ as.character(screen_name)))
+
+
+coverage<- coverage %>% select(screens, coverage=coverage.x, screen_name, Time_Point, TP)
+coverage$TP[is.na(coverage$TP)]<- "Null"
+
+supp_fig_3_a<- coverage %>% ggplot(aes(x=screen_name, y=coverage, color=TP))+geom_point()+theme_su()+theme(axis.text.x = element_text(angle = 90, size=6))+geom_hline(yintercept = mean(coverage$coverage))+scale_color_nejm(name="Time Point")+ggtitle("All Dolcetto Screens-Raw reads coverage")
+supp_fig_3_a
+
+
+ggsave(supp_fig_3_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_a.svg", width = 5, height = 3, units = "in", dpi = 1000)
+
+print(paste("average coverage of screens is", round(mean(coverage$coverage),0), "with maximum coverage of", round(max(coverage$coverage),0)))
+
+
+
+```
+
+final time points are sequenced targeting 500X coverage, interval time points target coverage was 125X, when reads for all replicates are summed together we obtain ~3600X for IPSC monoclonal screens.
+
+### uniformity of plasmid library distribution and Gini index
+Gini index measures the equality of distribution within a population. it is used to measure if distribution of guides within a library is skewed or not. Values between 0-0.2 means perfect equality and 0.2-0.4 denotes equality
+```{r}
+
+reference_reads<- all_dolcetto_reads_curated %>% select(references) 
+reference_reads_melted<- reference_reads %>% melt()
+reference_reads_melted %>% ggplot(aes(x=value, color=variable))+geom_density()
+```
+
+
+```{r}
+##calculate gini index and other features of the libraries
+
+gini_values<- as.data.frame(names(reference_reads))
+names(gini_values)<- c("Library")
+index<- c(1:ncol(reference_reads))
+for (i in index) {
+  gini_values[i,"gini_index"]<-ineq(reference_reads[,i])
+  gini_values[i,"Zero_reads"]<-nrow(reference_reads %>% filter(reference_reads[,i]==0))
+  gini_values[i,"x<16"]<-nrow(reference_reads %>% filter(reference_reads[,i]< 16))
+  gini_values[i,"max"]<-max(reference_reads[,i])
+  gini_values[i,"median"]<-median(reference_reads[,i])
+  gini_values[i,"mean"]<-mean(reference_reads[,i])
+}
+gini_values
+write_csv2(gini_values, file = "output/supp_table_2_gini_values.txt")
+
+```
+distribution of guides in libraries are not skewed
+
+### LFC calculation
+```{r}
+
+set_1<- all_dolcetto_reads_curated %>% select(Guide.Sequence, Gene,func,reference=DOLCETTO,D1M_D9,D1M_D14, D1M_D18, contains(c("D1M1", "D1M2", "K562")))
+names(set_1)
+
+set_2<- all_dolcetto_reads_curated %>% select(Guide.Sequence, Gene,func, reference=DOL.V2, contains(c("D1P", "D2M", "ARID1A")))
+
+set_3<- all_dolcetto_reads_curated %>% select(Guide.Sequence, Gene,func, reference=Dol.V3, contains("D1M3"))
+names(set_3)
+
+
+```
+ screens are run as two sets with different plasmid libraries so log2 fold change is calculated as two sets:
+ 
+ ### Set 1 LFC
+```{r}
+names(set_1)
+column_sums_1<- colSums(set_1[4:ncol(set_1)], na.rm = T)
+
+set_1$Log<- log2((sweep(set_1[4:ncol(set_1)], 2, column_sums_1,FUN = "/", check.margin = TRUE))*10^6 +1)
+set_1 <- do.call("data.frame",set_1)
+names(set_1)
+set_1$LFC <- set_1[,49:91]- set_1[,"Log.reference"]
+set_1 <- do.call("data.frame",set_1)
+names(set_1)
+set_1_LFC<- set_1 %>% select(1:3, contains("LFC.Log"))
+names(set_1_LFC) <- gsub(x = names(set_1_LFC), pattern = "LFC.Log.", replacement = "")
+
+
+
+```
+  
+ ### Set 2 LFC
+```{r}
+names(set_2)
+column_sums_2<- colSums(set_2[4:50], na.rm = T)
+
+set_2$Log<- log2((sweep(set_2[4:50], 2, column_sums_2,FUN = "/", check.margin = TRUE))*10^6 +1)
+set_2 <- do.call("data.frame",set_2)
+names(set_2)
+set_2$LFC <- set_2[,52:97]- set_2[,"Log.reference"]
+set_2 <- do.call("data.frame",set_2)
+names(set_2)
+set_2_LFC<- set_2 %>% select(1:3, contains("LFC.Log"))
+names(set_2_LFC) <- gsub(x = names(set_2_LFC), pattern = "LFC.Log.", replacement = "")
+names(set_2_LFC)
+```
+
+##LFC for set 3
+```{r}
+
+column_sums_3<- colSums(set_3[4:ncol(set_3)], na.rm = T)
+
+set_3$Log<- log2((sweep(set_3[4:ncol(set_3)], 2, column_sums_3,FUN = "/", check.margin = TRUE))*10^6 +1)
+set_3 <- do.call("data.frame",set_3)
+names(set_3)
+set_3$LFC <- set_3[,11:15]- set_3[,"Log.reference"]
+set_3 <- do.call("data.frame",set_3)
+names(set_3)
+set_3_LFC<- set_3 %>% select(1:3, contains("LFC.Log"))
+names(set_3_LFC) <- gsub(x = names(set_3_LFC), pattern = "LFC.Log.", replacement = "")
+names(set_3_LFC)
+
+
+all_dolcetto_LFC<- full_join(set_1_LFC, set_2_LFC, by=c("Guide.Sequence","Gene", "func"))
+all_dolcetto_LFC<- full_join(all_dolcetto_LFC,set_3_LFC, by=c("Guide.Sequence","Gene", "func"))
+names(all_dolcetto_LFC)
+
+write_csv(all_dolcetto_LFC, file="output/all_dolcetto_curated_LFC.txt")
+all_dolcetto_LFC<- read_csv( file="output/all_dolcetto_curated_LFC.txt")
+
+
+
+```
+ 
+ ### calculate guide level LFC correlation
+```{r}
+library(reshape2)
+
+cormat<- round(cor(all_dolcetto_LFC[,4:97], method = "pearson"),3)
+
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+melted_cormat<- melted_cormat %>%  arrange(Var1)
+
+supp_fig_3_b<-ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Guide Level LFC correlations")+scale_fill_continuous(name="Pearson's R")
+supp_fig_3_b
+
+ggsave(supp_fig_3_b, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_b.svg", width = 6, height = 5, units = "in", dpi = 1000)
+
+```
+
+##correlation plot focusing only final time points
+```{r}
+final_screens<- all_dolcetto_LFC %>% select(1:3, contains(c("D18", "D21", "D22")))
+names(final_screens)
+cormat2<- round(cor(final_screens[,4:43], method = "pearson"),3)
+
+melted_cormat2 <- melt(cormat2)
+head(melted_cormat2)
+melted_cormat2<- melted_cormat2 %>%  arrange(Var1)
+
+ggplot(data = melted_cormat2, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Guide Level LFC correlations of final time points")
+
+```
+
+##correlation_plot of monoclonal IPSC and K562 cells final time point
+```{r}
+
+ipsc_k562_final<- final_screens %>% select(1:3, contains(c("D1M","D2M")), K562_D21, K562_R1_D21, K562_R2_D21)
+names(ipsc_k562_final)<- gsub(x=names(ipsc_k562_final),pattern = "_D.*", replacement = "")
+names(ipsc_k562_final)
+cormat3<- round(cor(ipsc_k562_final[,4:length(ipsc_k562_final)], method = "pearson"),3)
+
+
+melted_cormat3 <- melt(cormat3)
+
+melted_cormat3<- melted_cormat3 %>%  arrange(Var1)
+
+ggplot(data = melted_cormat3, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Guide Level LFC correlations of final time points (Monoclonal Lines)") +geom_text(aes(label = round(value, 2)), size=2.5) 
+```
+
+```{r}
+library(ggpubr)
+
+library(cowplot)
+
+scatter1<-
+ggplot()+geom_point(data=(ipsc_k562_final %>% filter(func=="Other")),aes(x=D1M1_All, y=D1M2_All, color=func), size=0.05, alpha=0.5)+geom_point(data=(ipsc_k562_final %>% filter(func!="Other")),aes(x=D1M1_All, y=D1M2_All, color=func), size=0.05, alpha=0.5)+geom_point(data=(ipsc_k562_final %>% filter(func=="CONTROL")),aes(x=D1M1_All, y=D1M2_All, color=func), size=0.05, alpha=0.5)+stat_cor(inherit.aes = F, data=ipsc_k562_final, aes(x=D1M1_All, y=D1M2_All, label = ..r.label..))+ scale_color_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other", "CONTROL"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-Targeting Control", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF",  "CONTROL"="forestgreen", "Other"="#E18727FF" ))+ xlab("Replicate 1, Log2 Fold Change")+ ylab("Replicate 2, Log2 Fold Change")+ ggtitle("Whole Genome CRISPRi Screens in Monoclonal hIPSC lines")+theme_su()
+scatter1
+
+
+
+ydens <- axis_canvas(scatter1, axis = "y", coord_flip = T)+  geom_density(data = ipsc_k562_final, aes( x=D1M1_All, fill=func),alpha = 0.5, size = 0.2)+ scale_fill_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other", "CONTROL"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-Targeting Control", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF",  "CONTROL"="forestgreen", "Other"="#E18727FF" ))+ theme_su()+theme(axis.title = element_blank(), axis.text =  element_blank(), axis.ticks =  element_blank())+coord_flip()
+ydens
+
+
+p1 <- insert_yaxis_grob(scatter1, ydens, grid::unit(.2, "null"), position = "right")
+figure_3_b<- ggdraw(p1)
+figure_3_b
+ggsave(figure_3_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/fig_3_b.svg", width = 4, height = 2.5, units = "in", dpi=1000)
+```
+
+#produce same plot for K562 screens:
+```{r}
+scatter2<-
+ggplot()+geom_point(data=(ipsc_k562_final %>% filter(func=="Other")),aes(x=K562_R1, y=K562_R2, color=func), size=0.05, alpha=0.5)+geom_point(data=(ipsc_k562_final %>% filter(func!="Other")),aes(x=K562_R1, y=K562_R2, color=func), size=0.05, alpha=0.5)+geom_point(data=(ipsc_k562_final %>% filter(func=="CONTROL")),aes(x=K562_R1, y=K562_R2, color=func), alpha=0.5, size=0.05)+stat_cor(inherit.aes = F, data=ipsc_k562_final, aes(x=K562_R1, y=K562_R2, label = ..r.label..))+ scale_color_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other", "CONTROL"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-Targeting Control", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF",  "CONTROL"="forestgreen", "Other"="#E18727FF" ))+ xlab("Replicate 1, Log2 Fold Change")+ ylab("Replicate 2, Log2 Fold Change")+ ggtitle("Whole Genome CRISPRi Screens in Monoclonal K562 Cell lines")+theme_su()
+scatter2
+
+
+ydens2 <- axis_canvas(scatter1, axis = "y", coord_flip = T)+  geom_density(data = ipsc_k562_final, aes( x=K562_R2,  fill=func),alpha = 0.5, size = 0.2)+ scale_fill_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other", "CONTROL"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-Targeting Control", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF",  "CONTROL"="forestgreen", "Other"="#E18727FF" ))+ theme_su()+theme(axis.title = element_blank(), axis.text =  element_blank(), axis.ticks =  element_blank())+coord_flip()
+ydens2
+
+
+
+p2 <- insert_yaxis_grob(scatter2, ydens2, grid::unit(.2, "null"), position = "right")
+p2
+supp_fig_3_c<- ggdraw(p2)
+supp_fig_3_c
+ggsave(supp_fig_3_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_c.svg", width = 4, height = 2.5, units = "in", dpi=1000)
+
+
+
+```
+
+### Correlation plot for publication
+```{r}
+names(final_screens)
+
+
+selected<- final_screens %>% select(1:3,D1P_D22, D1P1_All_D22, D1P2_All_D22, D1M1R1_D18, D1M1R2_D18, D1M1_All_D18,D1M2_All_D18, D1M_D18,D2M1_All_D21, D2M2_All_D18)
+names(selected)
+
+cormat4<- round(cor(selected[,4:13], method = "pearson"),3)
+
+melted_cormat4 <- melt(cormat4)
+
+melted_cormat4<- melted_cormat4 %>%  arrange(Var1)
+
+
+
+levels(melted_cormat4$Var1)
+
+supp_fig_3_d<-ggplot(data = melted_cormat4, aes(x=Var1, y=Var2, fill=value)) +  geom_tile() +theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ggtitle("Replicate correlation of whole genome screens in hIPSC lines\nGuide Level Log2 Fold Change") +geom_text(aes(label = round(value, 2)), size=2, color="white") +theme(axis.title = element_blank())+ scale_fill_gradient(name="Pearson Correlation")
+supp_fig_3_d
+
+ggsave(supp_fig_3_d, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_d.svg", units = "in", width = 5, height = 4)
+
+
+```
+
+### Calculate Gene Mean Log2 Fold Change
+
+```{r}
+all_dolcetto_LFC_Gene<- all_dolcetto_LFC %>% select(2:97) %>%  group_by(Gene, func) %>% 
+  summarise(across(
+    .cols = where(is.numeric), 
+    .fns = list(Mean = mean), na.rm = TRUE, 
+    .names = "{col}"
+  )) %>% filter(func !="CONTROL") %>% droplevels() 
+
+write_csv(all_dolcetto_LFC_Gene, file="output/all_dolcetto_LFC_Gene.txt")
+```
+
+
+```{r}
+all_dolcetto_LFC_Gene<- read_csv(file="output/all_dolcetto_LFC_Gene.txt")
+names(all_dolcetto_LFC_Gene)
+
+supp_fig_3_e<- ggplot()+geom_point(data=(all_dolcetto_LFC_Gene %>% filter(func=="Other")),aes(x=D1M1_All_D18, y=D1M2_All_D18, color=func), size=0.05, alpha=0.5)+geom_point(data=(all_dolcetto_LFC_Gene %>% filter(func!="Other")),aes(x=D1M1_All_D18, y=D1M2_All_D18, color=func), size=0.05, alpha=0.5)+stat_cor(inherit.aes = F, data=all_dolcetto_LFC_Gene, aes(x=D1M1_All_D18, y=D1M2_All_D18, label = ..r.label..))+ scale_color_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF", "Other"="#E18727FF" ))+ xlab("Replicate 1, Log2 Fold Change")+ ylab("Replicate 2, Log2 Fold Change")+ ggtitle("Whole Genome CRISPRi Screens in Monoclonal hIPSC lines\nGene Mean Log2 Fold Change")+theme_su()
+supp_fig_3_e
+
+ggsave(supp_fig_3_e, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_e.svg", units = "in", width = 5, height = 4,dpi=1000)
+
+supp_fig_3_f<-ggplot()+geom_point(data=(all_dolcetto_LFC_Gene %>% filter(func=="Other")),aes(x=K562_R1_D21, y=K562_R2_D21, color=func), size=0.05, alpha=0.5)+geom_point(data=(all_dolcetto_LFC_Gene %>% filter(func!="Other")),aes(x=K562_R1_D21, y=K562_R2_D21, color=func), size=0.05, alpha=0.5)+stat_cor(inherit.aes = F, data=all_dolcetto_LFC_Gene, aes(x=K562_R1_D21, y=K562_R2_D21, label = ..r.label..))+ scale_color_manual(name="Target Gene Function",limits=c("CEG", "NEG", "Other"),labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes", "Other"="Other Genes"), values=c("CEG"="#BC3C29FF" , "NEG"="#0072B5FF", "Other"="#E18727FF" ))+ xlab("Replicate 1, Log2 Fold Change")+ ylab("Replicate 2, Log2 Fold Change")+ ggtitle("Whole Genome CRISPRi Screens in Monoclonal K562 Cell lines\nGene Mean Log2 Fold Change")+theme_su()
+supp_fig_3_f
+
+ggsave(supp_fig_3_f, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_f.svg", units = "in", width = 5, height = 4, dpi=1000)
+```
+
+## Gene mean LFC correlation plot
+```{r}
+selected_gene<- all_dolcetto_LFC_Gene %>% select(1:2,D1P_D22, D1P1_All_D22, D1P2_All_D22, D1M1R1_D18, D1M1R2_D18, D1M1_All_D18,D1M2_All_D18, D1M_D18,D2M1_All_D21, D2M2_All_D18, K562_R1_D21, K562_R2_D21, K562_D21)
+
+
+cormat5<- round(cor(selected_gene[,3:15], method = "pearson"),3)
+
+melted_cormat5 <- melt(cormat5)
+
+melted_cormat5<- melted_cormat5 %>%  arrange(Var1)
+
+figure_3_c<-ggplot(data = melted_cormat5, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), axis.title = element_blank(), legend.title = element_blank()) + ggtitle("Correlations of whole genome screens \nin hIPSC lines (Gene Mean LFC)") +geom_text(aes(label = round(value, 2)), size=2, color="Black") + scale_fill_gradient(name="Gene Mean LFC \nPearson Correlations", low = "#1874CD", high = "Azure")
+figure_3_c
+ggsave(figure_3_c,  filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/fig_3_c_new.svg", units = "in", width = 4, height = 2.5, dpi=1000)
+
+
+```
+### calculate time dependent depletion
+
+```{r}
+a<- all_dolcetto_LFC_Gene
+a$D1M_D5<- (a$D1M1R1_D5+ a$D1M1R3_D5+ a$D1M2R1_D5+ a$D1M2R3_D5)/4
+names(a)
+a <-a %>% select(Gene, func, contains(c("D1M_","K562_D", "D1M3")))
+
+
+time_analysis<- melt(a)
+time_analysis<- time_analysis %>% separate(variable, into = c("Screen", "time"), sep = "_D")
+time_analysis<- time_analysis %>% mutate(Screen=case_when(
+  Screen=="D1M" ~"IPSC",
+  grepl('D1M3', Screen)  ~ "Prescreen",
+     TRUE ~ as.character(Screen)))
+time_analysis<- do.call("data.frame", time_analysis)
+  
+levels(time_analysis$Screen)
+
+
+level_order <- c("3","4","5","9","10","14", "18", "21","22")
+
+supp_fig_3_g<- time_analysis %>% filter(func=="CEG") %>% ggplot(aes(x=value, color=factor(time,level=level_order)))+ geom_density()+facet_grid(~Screen)+theme_su()+xlab("Gene Mean Log2 Fold Change")+scale_color_aaas(name="Days After\nInfection")
+supp_fig_3_g
+
+
+ggsave(supp_fig_3_g,  filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_g.svg", units = "in", width = 4, height = 2.5, dpi=1000)
+
+```
+
+
+
+### calculate ROC curve and AUC values:
+
+
+```{r}
+all_dolcetto_LFC_Gene<- read_csv( file="output/all_dolcetto_LFC_Gene.txt")
+
+
+gene_NEG_CEG<- all_dolcetto_LFC_Gene %>% filter(func=="CEG"|func=="NEG")
+
+
+gene_NEG_CEG <- gene_NEG_CEG %>% mutate(ess=case_when(
+  func== "CEG" ~1,
+  func=="NEG"~ 0
+))
+gene_NEG_CEG<- do.call("data.frame",gene_NEG_CEG)
+
+
+b<- list()
+names(gene_NEG_CEG)
+
+
+names<- names(gene_NEG_CEG[,3:97])
+names
+
+index<- c(1:95)
+for (i in index){ 
+  b[[names[i]]] <- roc(ess ~ gene_NEG_CEG[,i+2], data=gene_NEG_CEG)
+}
+
+
+
+d<- as.data.frame(matrix(nrow = 95, ncol = 2))
+
+for (i in index){
+  d[i,1]<-names[i]
+  d[i,2]<- b[[i]][["auc"]] }
+d %>% ggplot(aes(x=V1, y=V2))+geom_point()+ theme(axis.text.x = element_text(angle=90))
+
+all_screens_auc<-d
+write_csv(all_screens_auc, file="output/all_screen_auc.txt")
+```
+
+```{r}
+
+m<- all_screens_auc %>% separate(V1, into = c("Screen", "Time"), sep="_D")
+m<- do.call(data.frame,m)
+summary(m$Time)
+m<- m %>% mutate(TP=case_when(
+  Time %in% c(3,4,5)~ "Prescreen",
+  Time %in% c(9,10,11)~ "TP1",
+  Time %in% c(13,14,15)~ "TP2",
+  Time %in% c(18,21)~ "TP3",
+  Time %in% c(22)~ "TP4"))
+m<- do.call("data.frame",m)
+levels(m$TP)
+  
+m %>% ggplot(aes(x=Screen, y=V2, color=TP))+geom_point()+theme(axis.text.x = element_text(angle=90))
+
+levels(m$Screen)
+selected_screens<- c(
+  "D1M",         "D1M1_All" ,  
+ "D1M1R1" ,        "D1M1R3",     
+ "D1M2_All",       "D1P",     
+ "D2M1_All",       "D2M2_All","K562")
+
+n<- m %>% filter(Screen %in% selected_screens) %>% filter(TP!="Prescreen")
+
+fig_3_e<-n %>% ggplot(aes(x=Screen, y=V2, color=TP))+geom_point(size=2, alpha=0.5)+theme_su()+theme(axis.text.x = element_text(angle=90))+xlab("Screens")+scale_color_aaas(name="Time Point")+ggtitle("Whole Genome Screens\n AUC Values for Different Time Points")+ylab("AUC\n(Area Under Receiver Operating Characteristic Curve)")
+fig_3_e
+
+ggsave(fig_3_e, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/fig_3_e_new.svg", units = "in", width = 4, height = 3)
+
+
+```
+ROC curve with final time points
+
+```{r}
+final_roc_data<- all_dolcetto_LFC_Gene %>% select(Gene,func,D1M1=D1M1_All_D18, D1M2=D1M2_All_D18, D1M1R1=D1M1R1_D18, D1M1R2=D1M1R2_D18,D2M1=D2M1_All_D21, D2M2=D2M2_All_D18, D1P1=D1P1_All_D22, D1P2=D1P2_All_D22, K562=K562_D21 )
+final_roc_data_NEG_CEG<- final_roc_data%>% filter(func=="CEG"|func=="NEG")
+
+
+final_roc_data_NEG_CEG <- final_roc_data_NEG_CEG %>% mutate(ess=case_when(
+  func== "CEG" ~1,
+  func=="NEG"~ 0
+))
+final_roc_data_NEG_CEG<- do.call("data.frame",final_roc_data_NEG_CEG)
+
+
+roc_list<- list()
+names(final_roc_data_NEG_CEG)
+
+
+names<- names(final_roc_data_NEG_CEG[,3:11])
+names
+
+index<- c(1:9)
+for (i in index){ 
+  roc_list[[names[i]]] <- roc(ess ~ final_roc_data_NEG_CEG[,i+2], data=final_roc_data_NEG_CEG)
+}
+
+
+rocfirstplot<- ggroc(roc_list)+
+  theme_bw()+xlab("FPR")+ylab("TPR")+theme(axis.text=(element_text(size=10)),legend.title = element_blank(), legend.position=c(.7, 0.45),legend.text=element_text(size =14))+scale_color_npg()
+rocfirstplot
+ggsave(rocfirstplot, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/fig_3_d_new.svg", units = "in", width = 4, height = 3)
+
+
+```
+
+###polyclonal vs monoclonal comparison
+```{r}
+names(all_dolcetto_LFC_Gene)
+density_poly<-
+all_dolcetto_LFC_Gene %>% ggplot()+geom_density(aes(x=D1P_D22, fill=func), alpha=0.7, color="black")+ scale_fill_nejm(name="Target Gene Function",labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-targeting_control", "Other"="Other Genes"))+scale_color_nejm(name="Target Gene Function",labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-targeting_control", "Other"="Other Genes"))+theme_su()+xlim(-6,4)+ xlab("Log2 Fold Change")+ggtitle("Fiaj Polyclonal Line Screen")
+
+density_mono<-
+all_dolcetto_LFC_Gene %>% ggplot(aes(x=D1M_D18, fill=func))+geom_density( alpha=0.7, color="black")+ scale_fill_nejm(name="Target Gene Function",labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-targeting_control", "Other"="Other Genes"))+scale_color_nejm(name="Target Gene Function",labels=c("CEG"="Core Essential Genes" , "NEG"="Non-Essential Genes",  "CONTROL"="Non-targeting_control", "Other"="Other Genes"))+theme_su()+xlim(-6,4)+ xlab("Log2 Fold Change")+ggtitle("Fiaj Monoclonal Line Screen")+theme(axis.title.x=element_blank())
+
+supp_fig_3_h<-ggarrange(density_mono, density_poly, ncol=1, common.legend = T, legend = "right")
+density_mono
+density_poly
+
+supp_fig_3_h
+ggsave(supp_fig_3_h, filename ="E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_3/supp_fig_3_h.svg", units = "in", width = 3, height = 3,dpi=1000 )
+
+
+
+
+```
+
+
