@@ -1,0 +1,161 @@
+---
+title: "TSS_effect"
+author: "Sunay"
+date: '2023-02-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(ggrepel)
+```
+
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+```
+##read in tiling screen data
+```{r}
+xin_crispri <- read.csv2("input/xin_crispri.txt")
+
+xin_crispri<- do.call("data.frame", xin_crispri)
+levels(xin_crispri$Purpose)
+tss_diff<- xin_crispri %>% filter(Purpose=="CRISPRi, TSS Check, Diff") %>% droplevels()
+a<- as.data.frame(table(tss_diff %>% select(Gene, TSS_locus))) 
+a<- a %>% filter(Freq>0)
+b<- as.data.frame(table(a$Gene))
+b<- b %>% filter(Freq>1)
+
+c<- tss_diff %>% group_by(Gene,transcript_id) %>% summarise(tr_LFC=mean(Av_LFC))
+d<- c %>% group_by(Gene) %>% summarise(min_tr_LFC=min(tr_LFC))
+e<- left_join(c,d, by="Gene")
+
+f<- e %>% filter(Gene %in% b$Var1)
+f<- f %>% filter(min_tr_LFC< -0.5)
+g<- left_join(f, tss_diff, by=c("Gene", "transcript_id"))
+
+m<- g %>% group_by(Gene) %>% summarise(dist=abs(min(TSS_locus)-max(TSS_locus)), diff_LFC=abs(min(tr_LFC)-max(tr_LFC)))
+
+
+
+iPSC_FANTOM5_promoters <- read.delim("input/iPSC_FANTOM5_promoters.tsv")
+gene_strand_info<- iPSC_FANTOM5_promoters %>% select(gene_name, strand) %>% unique()
+gene_strand_info<- gene_strand_info %>% rename(Gene="gene_name", gene_strand="strand")
+
+g<- left_join(g, gene_strand_info, by="Gene")
+g <- g %>% mutate(gene_strand=case_when(
+  gene_strand=="+"~1,
+  gene_strand=="-"~ -1
+))
+summary(g$gene_strand)
+
+gene_tr2<- b %>% filter(Freq==2) 
+gene_tr3<- b %>% filter(Freq==3)
+
+data_tr2<- g %>% filter(Gene %in% gene_tr2$Var1)
+data_tr3<- g %>% filter(Gene %in% gene_tr3$Var1)
+
+n<- data_tr2 %>% group_by(Gene) %>% summarise(min_tr_locus=min(TSS_locus), max_tr_locus=max(TSS_locus))
+n$tr_distance<- abs(n$min_tr_locus -n$max_tr_locus)
+data_tr2<- left_join(data_tr2, n, by="Gene")
+data_tr2$tr1_distance<- (data_tr2$locus-data_tr2$min_tr_locus)*data_tr2$gene_strand
+data_tr2$tr2_distance<- (data_tr2$locus-data_tr2$max_tr_locus)*data_tr2$gene_strand
+
+g1<- data_tr2 %>% select(Gene, transcript_id, Av_LFC, new_tss_dist=tr1_distance) %>% mutate(tr="tr1")
+g1<- g1 %>% filter(new_tss_dist >-200 & new_tss_dist< 300)
+g2<- data_tr2 %>% select(Gene, transcript_id, Av_LFC, new_tss_dist=tr2_distance)%>% mutate(tr="tr2")
+g2<- g2 %>% filter(new_tss_dist>-200 & new_tss_dist< 300)
+
+ln<- data_tr3 %>% group_by(Gene) %>% summarise(min_tr_locus=min(TSS_locus), max_tr_locus=max(TSS_locus), med_tr_locus=median(TSS_locus))
+library(tidyr)
+ln<-data_tr3 %>% select(Gene, TSS_locus) %>% unique()
+p<- c("tr1", "tr2", "tr3","tr1", "tr2", "tr3","tr1", "tr2", "tr3","tr1", "tr2", "tr3")
+ln$tr<-p
+ln2<- spread(ln, key=tr, value = TSS_locus)
+
+data_tr3<- left_join(data_tr3, ln2, by="Gene")
+data_tr3$tr1_distance<- (data_tr3$locus-data_tr3$tr1)*data_tr3$gene_strand
+data_tr3$tr2_distance<- (data_tr3$locus-data_tr3$tr2)*data_tr3$gene_strand
+data_tr3$tr3_distance<- (data_tr3$locus-data_tr3$tr3)*data_tr3$gene_strand
+
+g3<- data_tr3 %>% select(Gene, transcript_id, Av_LFC, new_tss_dist=tr1_distance) %>% mutate(tr="tr1")
+g3<- g3 %>% filter(new_tss_dist >-200 & new_tss_dist< 300)
+g4<- data_tr3 %>% select(Gene, transcript_id, Av_LFC, new_tss_dist=tr2_distance)%>% mutate(tr="tr2")
+g4<- g4 %>% filter(new_tss_dist>-200 & new_tss_dist< 300)
+g5<- data_tr3 %>% select(Gene, transcript_id, Av_LFC, new_tss_dist=tr3_distance)%>% mutate(tr="tr3")
+g5<- g5 %>% filter(new_tss_dist>-200 & new_tss_dist< 300)
+
+library(ggsci)
+g_all<- rbind(g1,g2,g3,g4,g5)
+fig_1<- g_all %>% ggplot()+geom_boxplot(aes(x=Gene, y=Av_LFC, fill=tr), outlier.shape = NA)+theme_su()+
+  scale_fill_nejm(name="Target\nTranscript", labels=c("tr1"="Transcript 1",
+                                              "tr2"="Transcript 2",
+                                              "tr3"="Transcript 3"))+
+  theme(axis.text.x = element_text(angle=50))+ylim(-2.5, 1)+geom_hline(yintercept = 0, linetype="dotdash", color="gray")+ylab("Average Log2 Fold Change")
+fig_1
+ggsave(fig_1, file="fig1.jpg", width=10, height=7, unit="cm")
+library(svglite)
+ggsave(fig_1, file="fig1.svg", width=15, height=7, unit="cm")
+
+
+
+
+
+```
+
+

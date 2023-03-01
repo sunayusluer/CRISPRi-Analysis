@@ -1,0 +1,387 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+Xin library includes 80K guides with different purpose.
+one of the main chunks is 30K CRISPRi test library, where top 2 TSS site of 20 core essential genes with alternative TSS site in IPSC were tiled with guides targeting -200 to 300 bp around TSS.
+Similarly top 2 TSS of another 20 core essential genes using canonical TSS are also tiled for 500bp around TSS.
+Remaining library consists of guides tiling ~900 essential genes from 0 to 100bp after TSS.
+
+LFC is calculated as described before:
+there are two biological repeats, which are two separate infections. Each infection was split into two screens after first passage and kept as technical replicates.The final analyses done with merging all reads together  represented here as Av_LFC
+
+
+```{r}
+library(tidyverse)
+library(gridExtra)
+library(ggsci)
+library(ggpubr)
+library(reshape2)
+library(svglite)
+library(ggrepel)
+```
+
+
+```{r}
+
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+```
+
+
+
+
+### LFC is calculated as described before. Import XIN_CRISPRi file which includes LFC data for Xin screens
+
+
+```{r}
+
+XIN_CRISPRi <- read.csv2("input/xin_crispri.txt")
+ceg_neg_tiling <- read.delim("./input/ceg_neg_tiling.txt")
+
+names(XIN_CRISPRi)
+
+a<- rbind((XIN_CRISPRi %>% select(Guide.Sequence,Purpose,Gene)), (ceg_neg_tiling %>% select(Guide.Sequence, Purpose=purpose, Gene)))
+b<- as.data.frame(table(a %>% select(Purpose))) %>% filter(Freq!=0)
+
+
+
+b <-b%>% 
+  mutate(csum = rev(cumsum(rev(Freq))), 
+         pos = Freq/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), Freq/2, pos))
+
+
+
+sup_fig_2_a<- ggplot(b, aes(x = "" , y = Freq, fill = fct_inorder(Var1))) +
+  geom_col(width = 1, color = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_jco() +
+  geom_label_repel(data = b,
+                   aes(y = pos, label = paste0(Freq)),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  guides(fill = guide_legend(title = "Group")) +
+  theme_void()+ggtitle("Xin Library")
+
+sup_fig_2_a
+
+
+
+ggsave(sup_fig_2_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/sup_fig_2_a.svg", width = 4, height = 4, units = "in", dpi=1000)
+
+number_of_genes_per_purpose<- as.data.frame(table(a %>% select(Purpose, Gene))) %>% filter(Freq!=0) %>% select(!Freq)
+
+number_of_genes_per_purpose<-as.data.frame(table((number_of_genes_per_purpose$Purpose)))
+number_of_genes_per_purpose<- number_of_genes_per_purpose %>% rename("Number_of_Genes"=Freq)
+number_of_genes_per_purpose
+
+```
+
+
+
+controls are filtered out for rest of the analyses
+
+
+```{r}
+XIN_CRISPRi_no_control<- XIN_CRISPRi %>% filter(Annot != "control") %>% filter(transcript_id!="missed") %>%  droplevels()
+```
+
+calculate number of trancripts targeted for each gene and their distances
+
+```{r}
+m<- XIN_CRISPRi_no_control %>% select(Gene, transcript_id,TSS, Purpose)
+names(m)
+m<- unique(m)
+print(paste("There are", nrow(m), "unique transcripts targeted"))
+```
+ 
+later I calculated number of transcripts per gene
+
+```{r}
+t<- as.data.frame(table(m$Gene))
+t<- t %>% rename(Gene=Var1, num_of_tr=Freq)
+m<- left_join(m,t, by="Gene")
+number_of_guides<- as.data.frame(table(XIN_CRISPRi_no_control %>% select(Gene,Purpose)))
+number_of_guides<- number_of_guides %>% filter(Freq != 0)
+head(number_of_guides)
+number_of_guides<- left_join(number_of_guides, t, by="Gene")
+number_of_guides %>% ggplot(aes(x=num_of_tr, fill=Purpose))+geom_bar()
+number_of_guides<- number_of_guides %>% rename(num_of_guide=Freq)
+
+```
+
+
+```{r}
+t<- as.data.frame(table(number_of_guides %>% select(num_of_tr, Purpose)))
+t
+```
+
+very low portion of genes are targeted from 3 transcripts. I will not focus on these but will focus on single transcripts and double transcripts.
+```{r}
+XIN_CRISPRi_no_control<- left_join(XIN_CRISPRi_no_control, number_of_guides, by=c("Gene", "Purpose"))
+
+
+```
+
+
+
+```{r}
+xin_per_gene_min<- XIN_CRISPRi_no_control %>% 
+    group_by(Gene) %>% 
+    slice(which.min(Av_LFC)) %>% select(Gene, Av_LFC) %>% rename(min_LFC=Av_LFC)
+XIN_CRISPRi_no_control<- left_join(XIN_CRISPRi_no_control, xin_per_gene_min, by="Gene")
+
+
+```
+
+First I focused genes only one transcript targeted in extra group. in order to eliminate signal loss due to genes that are not essential in hiPSC, I picked genes with Average LFC below -1 at
+```{r}
+tr1_extra<- XIN_CRISPRi_no_control %>% filter(Purpose == "CRISPRi, TSS Check, Extra")  %>% filter(num_of_tr<2) %>% droplevels() 
+nrow(tr1_extra %>% ungroup() %>% filter(min_LFC < -1))
+
+figure_2_a<-tr1_extra %>% ungroup() %>% filter(min_LFC < -1) %>%   mutate(bin=cut_width(TSS_distance, width=20, boundary=0)) %>% filter(!is.na(bin)) %>% droplevels() %>% ggplot(aes(x=bin, y=Av_LFC))+ geom_boxplot(fill="#E18727FF", alpha=0.7)+theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=6)) + ggtitle(paste("Genes with minimum LFC < -1, n=",count(tr1_extra %>%ungroup %>%  filter(min_LFC < -1) %>% select(Gene) %>%  unique())))+ylab("Log2 Fold Change")+ xlab("TSS distance in 20bp bins")+stat_compare_means(ref.group = "(20,40]", label = "p.signif", label.y = 1.7,method = "wilcox")+ylim(-5.5,2.4)+geom_hline(yintercept = 0, linetype="dashed", color= "gray")
+figure_2_a
+ggsave(figure_2_a, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/figure_2_a.svg", width = 3, height = 2, units = "in", dpi=1000)
+
+```
+
+I will repeat same analysis with the genes targeted between -200 to 300 (other group in library)
+
+```{r}
+other_1_2<-XIN_CRISPRi_no_control %>% filter(Purpose == "CRISPRi, TSS Check, Other")  %>% filter(num_of_tr<3) %>% droplevels()
+
+
+extra_1<- XIN_CRISPRi_no_control %>% filter(Purpose == "CRISPRi, TSS Check, Extra")  %>% filter(num_of_tr<2) %>% droplevels()
+mean(extra_1$Av_LFC)
+other_1_2<- other_1_2 %>% mutate(Av_LFC_corrected=(Av_LFC -1.2))
+nrow(other_1_2 %>% ungroup() %>% filter(min_LFC < -1))
+
+other_1_2_bins<-other_1_2 %>% ungroup() %>% filter(min_LFC < -1) %>%   mutate(bin=cut_width(TSS_distance, width=100, boundary=0))
+x<- other_1_2_bins %>% filter(bin=="(0,100]") %>% droplevels()
+median(x$Av_LFC_corrected)
+y<- other_1_2_bins %>% filter(bin=="(200,300]") %>% droplevels()
+median(y$Av_LFC_corrected)
+
+figure_2_b<-other_1_2 %>% ungroup() %>% filter(min_LFC < -1) %>%   mutate(bin=cut_width(TSS_distance, width=100, boundary=0)) %>% filter(!is.na(bin)) %>% droplevels() %>% ggplot(aes(x=bin, y=Av_LFC_corrected))+ geom_boxplot(fill="#7876B1FF", alpha=0.7)+theme_su()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=6)) + ggtitle(paste("Genes with minimum LFC < -1, n=",count(other_1_2 %>%ungroup %>%  filter(min_LFC < -1) %>% select(Gene) %>%  unique())))+ylab("Log2 Fold Change")+ xlab("TSS distance in 100bp bins")+stat_compare_means(ref.group = "(0,100]", label = "p.signif", label.y = 0.3,method = "wilcox")+ylim(-4.5,1)+geom_hline(yintercept = 0, linetype="dashed", color= "gray")
+figure_2_b
+ggsave(figure_2_b, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/figure_2_b.svg", width = 3, height = 2, units = "in", dpi=1000)
+figure_2_b
+
+```
+
+#Then I will focus on genes targeted by two transcripts and calculate distance between transcripts to see the effect of alternative TSS targeting
+```{r}
+tr2<- XIN_CRISPRi_no_control %>% filter(num_of_tr==2) %>% droplevels()
+names(tr2)
+a<- tr2 %>% select(Gene, transcript_id,TSS, Purpose)
+
+a<- unique(a)
+a$TSS<- as.integer(as.character(a$TSS))
+a<-a %>% filter(!is.na(TSS))
+
+
+a<- a %>% group_by(Gene) %>% mutate(difference=min(abs(TSS-lag(TSS, default = 0))),abs(TSS-lead(TSS, default = 0)))
+summary(a)
+
+
+a<- a %>% select(1,5)
+a<- unique(a)
+
+tr2<- left_join(tr2,a, by="Gene")
+
+tr2 %>% ggplot(aes(y=log10(difference)))+geom_boxplot()
+as.table(summary(tr2$difference))
+
+
+```
+
+then I randomly labelled alternative transcripsts as 1 or 2
+
+```{r}
+x<- tr2 %>% select(Gene, transcript_id) %>% distinct() %>% arrange(Gene)
+x1<-rep(c(1,2),times=527)
+x$tr_id<- x1
+X2<- left_join(tr2, x, by=c("Gene", "transcript_id"))
+tr2<-X2
+
+tr2_extra_distant <-tr2 %>% filter(Purpose=="CRISPRi, TSS Check, Extra") %>% filter(difference>200)
+print(paste("unique genes in extra group with distance between two transcripts is larger than 200bp:",length(unique(tr2_extra_distant$Gene))))
+```
+
+then I calculated average LFC per transcript:
+```{r}
+
+d<-tr2_extra_distant %>%  group_by(transcript_id) %>%
+  summarise_at(vars(Av_LFC), funs(mean(., na.rm=TRUE)))
+d<-left_join(tr2_extra_distant,d,by="transcript_id")
+summary(d$Av_LFC.y)
+d<- d %>% rename(tr_Av_LFC=Av_LFC.y)
+tr2_extra_distant<- d
+
+print("transcript average LFC summary")
+summary(tr2_extra_distant$tr_Av_LFC)
+
+```
+
+```{r}
+tr2_extra_distant_1<- tr2_extra_distant %>% select(Gene, transcript_id,tr_id, tr_Av_LFC, difference) %>% distinct() %>% filter(tr_id==1)
+tr2_extra_distant_2<- tr2_extra_distant %>% select(Gene, transcript_id,tr_id, tr_Av_LFC, difference) %>% distinct() %>% filter(tr_id==2)
+# combine two frames by transcript id
+tr2_extra_distant_x<- inner_join(tr2_extra_distant_1, tr2_extra_distant_2, by=c("Gene", "difference"))
+
+
+
+```
+
+```{r}
+tr2_extra_distant_x$LFC_difference<- abs(tr2_extra_distant_x$tr_Av_LFC.x -tr2_extra_distant_x$tr_Av_LFC.y)
+tr2_extra_distant_x<- tr2_extra_distant_x %>% mutate(min_LFC= pmin(tr_Av_LFC.x,tr_Av_LFC.y))
+
+figure_2_e<- tr2_extra_distant_x %>% ggplot(aes(x=log10(difference), y=LFC_difference, color=(as.numeric(as.character(min_LFC))), size=(as.integer(as.character(-min_LFC)))))+ geom_point(alpha=0.5)+ stat_cor(aes(label = ..r.label..))+ scale_color_gradient(name="Minimum of\nLog Fold Changes",low = "Darkblue",
+  high = "#E31A1C")+theme_su()+ ylab("LFC difference between transcripts")+xlab("Log10(distance between two TSS)")+scale_size_continuous(guide="none")+ggtitle("Alternative TSS effect on depletion")
+figure_2_e
+
+ggsave(figure_2_e, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/figure_2_e.svg", width = 4, height = 3, units = "in", dpi=1000)
+
+cenpa<-XIN_CRISPRi_no_control %>% filter(Gene=="CENPA") %>% droplevels() %>% select(transcript_id, Av_LFC)
+a<- cenpa %>% group_by(transcript_id) %>% summarise(mean=mean(Av_LFC), median=median(Av_LFC))
+
+figure_2_f<-XIN_CRISPRi_no_control %>% filter(Gene=="CENPA") %>% ggplot(aes(y=Av_LFC, x=TSS, fill=transcript_id))+geom_boxplot()+stat_compare_means(label.y = 2, label = "..p..")+scale_fill_npg(name="Trancript ID")+ theme_su()+xlab("TSS Locus")+ ylab("Log2 Fold Cahnge")+ylim(-3,3)+ggtitle("CENPA")
+figure_2_f
+
+ggsave(figure_2_f, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/figure_2_f.svg", width = 3, height = 2.2, units = "in", dpi=1000)
+
+
+```
+
+### Calculation of depletion in longer range:
+for this purpose we have two groups of guides in Xin library which tiles essential genes' coding region and also non essential genes. 
+LFC was calculated as described before:
+
+
+## tiling guides were selected and TSS locus was derived from fantom database and distance was calculated by substracting distance between guide locus from TSS locus.
+```{r}
+ceg_neg_tiling<- read_tsv(file="input/ceg_neg_tiling.txt")
+ipsc_TSS <- read.delim("./input/iPSC_FANTOM5_promoters.tsv")
+ipsc_TSS<- ipsc_TSS %>% filter(cpm_rank==1) %>% droplevels()
+names(ipsc_TSS)
+ipsc_TSS<- ipsc_TSS %>% select(Gene=gene_name, chr, strand, tss_start)
+
+names(ceg_neg_tiling)
+names(ipsc_TSS)
+
+ceg_neg_tiling<- inner_join(ceg_neg_tiling, ipsc_TSS, by="Gene")
+ceg_neg_tiling$TSS_distance<- abs(ceg_neg_tiling$tss_start- ceg_neg_tiling$locus)
+
+ceg_neg_tiling<- ceg_neg_tiling %>% mutate(bin=cut_width(TSS_distance, width=200, boundary=0)) %>% filter(!is.na(bin)) 
+ceg_neg_tiling<-ceg_neg_tiling %>% mutate(bin= case_when(
+  TSS_distance > 2000  ~ ">2000",
+  TRUE ~ as.character(bin)))
+ceg_neg_tiling <- do.call("data.frame",ceg_neg_tiling)
+
+symnum.args <- list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+level_order <- c("[0,200]", "(200,400]","(400,600]","(600,800]","(800,1000]", "(1000,1200]", "(1200,1400]", "(1400,1600]" ,"(1600,1800]","(1800,2000]",">2000")
+
+figure_2_c<-ceg_neg_tiling %>% ggplot(aes(x=factor(bin,level=level_order), y=Av_LFC, fill=purpose))+
+  geom_boxplot(outlier.shape = NA)+ stat_compare_means(label = "p.signif", symnum.args=symnum.args, label.y = 2.3, method = "t.test",na.rm = T)+
+  theme_su()+xlab("TSS distance in 200bp bins")+ylab("Log2 Fold Change")+ 
+  ggtitle("Depletion of gRNAs tiling  essential and non-essential genes")+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=6), text = element_text(size =6), legend.position = "bottom") +
+  scale_fill_manual(name="Essentiality" ,labels=c("Tiling, Hart Ess"="Core Essential Genes" , "Tiling, Hart Non-Ess"="Non-Essential Genes"),values=c("#BC3C29FF","#0072B5FF"))+ylim(-4,3.2)+geom_hline(yintercept = 0, linetype="dashed", color="gray")
+figure_2_c
+
+ggsave(figure_2_c, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/figure_2_c.svg", width = 5, height = 3, units = "in", dpi=1000)
+medians<- ceg_neg_tiling %>% group_by(purpose, bin) %>% summarise(bin_meds=median(Av_LFC), bin_means=mean(Av_LFC))
+medians
+
+```
+ 
+
+
+
+
+### cehck depletion of genes in CRISPRi tiling library are also depleted in whole genome screens in hiPSC and K562 cells
+
+```{r}
+whole_genome_gene_LFC<- read_csv("input/Whole_genome_gene_lfc.txt")
+
+tiling_genes<- whole_genome_gene_LFC %>% filter(Gene %in% XIN_CRISPRi$Gene) %>% droplevels()
+tiling_genes_melt<- melt(tiling_genes)
+
+tiling_genes_melt$Function<- "essential"
+tiling_nones<- ceg_neg_tiling %>% filter(purpose=="Tiling, Hart Non-Ess") %>% droplevels()
+
+
+tiling_genes_nones<- whole_genome_gene_LFC %>% filter(Gene %in% tiling_nones$Gene)
+tiling_genes_nones_melt<- melt(tiling_genes_nones)
+tiling_genes_nones_melt$Function<- "non essential"
+all_tiling_genes<- rbind(tiling_genes_melt, tiling_genes_nones_melt)
+
+supplementary_figure_2<- all_tiling_genes %>% ggplot(aes(x=variable, y=value, fill=Function))+geom_boxplot(outlier.shape = NA)+scale_fill_nejm(name="Gene\nFunction")+ylab("Gene Mean Log2 Fold Change")+xlab("Cell Line")+ggtitle("Depletion of tiling genes in whole genome screen")+theme_su()
+supplementary_figure_2
+ggsave(supplementary_figure_2, filename = "E:/Paper writing/CRIPSRi paper/Analyses/plots/panel_2/supplementary_figure_2.svg", width = 3, height = 2, units = "in", dpi=1000)
+
+```
+
+
+
+
+#### End of analysis

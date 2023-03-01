@@ -1,0 +1,194 @@
+---
+title: "locus_analysis"
+author: "Sunay Usluer"
+date: '2023-02-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+theme_su<-  function(){ 
+  font <- "Arial"   #assign font family up front
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+   
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = "Arial",            #set font family
+        size = 8,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3),               #raise slightly
+      
+      plot.subtitle = element_text(          #subtitle
+        family = "Arial",            #font family
+        size = 6),               #font size
+      
+      plot.caption = element_text(           #caption
+        family = "Arial",            #font family
+        size = 6,                 #font size
+        hjust = 1),               #right align
+      
+      axis.title = element_text(             #axis titles
+        family = "Arial",
+        
+        size = 6),               #font size
+      
+      axis.text = element_text(              #axis text
+        family = "Arial",            #axis famuly
+        size = 6),                #font size
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+     legend.title=element_text(
+       family="Arial",
+       size=8,
+       hjust = 0),
+     legend.text=element_text(
+       family = "Arial",
+       size=6),
+     
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank()
+     )
+  
+     
+    
+}
+
+
+```
+
+```{r}
+library(tidyverse)
+library(ggrepel)
+
+```
+read in Dolcetto screen LFC and library locus data
+```{r}
+guides<- read_delim(file="input/all_dolcetto_curated_LFC.txt", delim=",") %>% select(Guide.Sequence, Gene, func, D1M_D18)
+locs<- read_delim(file="input/Dolcetto_reference_GCHR38.txt",delim=",")
+locs$seq_19<- substr(locs$seq_20, start = 1, stop = 19)
+occurences<- as.data.frame(table(locs$seq_19))
+occurences<- occurences %>% rename(seq_19=Var1,Guide_count=Freq)
+locs<- left_join(locs, occurences,by="seq_19" )
+summary(locs$Guide_count)
+occurences %>% ggplot(aes(x=Guide_count))+geom_density()
+summary(as.factor(occurences$Guide_count))
+guide_counts<- as.data.frame(table(occurences$Guide_count))
+names(guides)
+
+guides<- guides %>% rename(seq_19=Guide.Sequence)
+a<- left_join(guides, occurences, by="seq_19")
+summary(a$Guide_count)
+a<-a %>% filter(!is.na(Guide_count))
+```
+
+# select only unique gRNAs 
+```{r}
+unique_guide_LFC_data<- a %>% filter(Guide_count==1) %>% droplevels()
+names(unique_guide_LFC_data)
+unique_guide_LFC_data<- left_join(unique_guide_LFC_data, locs, by="seq_19")
+names(unique_guide_LFC_data)
+unique_guide_LFC_data<-unique_guide_LFC_data %>% select(1:4,Guide_count=Guide_count.x, 7:12)
+write_tsv(unique_guide_LFC_data, file="unique_guide_LFC_data.txt")
+
+unique_guide_LFC_data<- do.call("data.frame", unique_guide_LFC_data)
+chromosomes<- as.data.frame(table(unique_guide_LFC_data$region))
+
+b<- unique_guide_LFC_data %>% mutate(chromosome=case_when(
+  region=="NC_000001.11"~1,
+  region=="NC_000002.12"~2,
+  region=="NC_000003.12"~3,
+  region=="NC_000004.12"~4,
+  region=="NC_000005.10"~5,
+  region=="NC_000006.12"~6,
+  region=="NC_000007.14"~7,
+  region=="NC_000008.11"~8,
+  region=="NC_000009.12"~9,
+  region=="NC_000010.11"~10,
+  region=="NC_000011.10"~11,
+  region=="NC_000012.12"~12,
+  region=="NC_000013.11"~13,
+  region=="NC_000014.9"~14,
+  region=="NC_000015.10"~15,
+  region=="NC_000016.10"~16,
+  region=="NC_000017.11"~17,
+  region=="NC_000018.10"~18,
+  region=="NC_000019.10"~19,
+  region=="NC_000020.11"~20,
+  region=="NC_000021.9"~21,
+  region=="NC_000022.11"~22,
+  region=="NC_000023.11"~23,
+  region=="NC_000024.10"~24
+  
+))
+b<- do.call(data.frame,b)
+summary(b$chromosome)
+unique_guide_LFC_data<-b
+```
+
+# add TSS expression data from Fantom Database
+We then checked the TSS annotation of the 4,203 genes showing a depletion phenotype in any previous essentiality screens (Funk et al., 2022), and expressed in human iPSCs according to the FANTOM database (Lizio et al., 2015)
+```{r}
+ipsc_tss<- read_delim(file="input/iPSC_FANTOM5_promoters.tsv", delim="\t")
+exp_ipsc_tss<- ipsc_tss %>% filter(cpm_max>0) %>% droplevels()
+
+phenotype_genes<- read_delim(file="input/phenotype_genes.txt", delim = "\t") %>% unique()
+
+unique_phenotype_guides<- unique_guide_LFC_data %>% filter(Gene %in% phenotype_genes$Gene)
+
+names(unique_phenotype_guides)
+names(exp_ipsc_tss)
+exp_ipsc_tss<- exp_ipsc_tss %>% rename("Gene"=gene_name)
+names(exp_ipsc_tss)
+phenotype_tss<- ipsc_tss %>% filter(gene_name %in% phenotype_genes$Gene)
+phenotype_tss %>% ggplot(aes(y=log2(cpm_max+2)))+geom_boxplot()
+
+m<- phenotype_tss %>% select(gene_name, cpm_max) %>% unique()
+ 
+summary(m$cpm_max)
+expressed_tss<- m %>% filter(cpm_max > 0) 
+
+unique_phenotype_guides<- unique_phenotype_guides %>% filter(Gene %in% expressed_tss$gene_name) %>% droplevels()
+
+phenotype_tss<- phenotype_tss %>% rename("Gene"=gene_name)
+guide_tss_unique<- left_join(unique_phenotype_guides,phenotype_tss, by="Gene" )
+d<-guide_tss_unique
+d$guide_to_tss_distance<- abs(d$start - d$tss_start)
+summary(d$guide_to_tss_distance)
+e<- d %>% filter(cpm_rank==1)
+summary(e$guide_to_tss_distance)
+
+e %>% ggplot(aes(y=log10(guide_to_tss_distance)))+geom_boxplot()
+
+nrow(e %>% filter(guide_to_tss_distance >1400) %>% select(Gene) %>% unique())
+
+f<- e %>% filter(guide_to_tss_distance >1400) %>% droplevels() %>% group_by(Gene) %>% summarise(mean_LFC=mean(D1M_D18))
+
+nrow(f %>%  filter(mean_LFC >-1))
+merged_annotated<- read_delim(file="input/merged_annotated.txt", delim=",")
+
+distant_tss_genes_merged<- merged_annotated %>% filter(Gene %in% f$Gene) %>% droplevels()
+
+
+
+
+
+plot1<-ggplot()+geom_point(data=distant_tss_genes_merged, aes(x=IPSC_AV_inh, y=IPSC_Av_Cut))+
+  geom_label_repel(data=(distant_tss_genes_merged %>% filter(IPSC_AV_inh >-1 & IPSC_Av_Cut< -0.5)), aes(x=IPSC_AV_inh, y=IPSC_Av_Cut, label=Gene))+
+  geom_point(data=(distant_tss_genes_merged %>% filter(IPSC_AV_inh >-1 & IPSC_Av_Cut< -0.5)), aes(x=IPSC_AV_inh, y=IPSC_Av_Cut), color="red")+
+  geom_vline(xintercept = -1)+geom_hline(yintercept = -0.5)+theme_bw()+ggtitle("LFC, Genes targeted by gRNAs\n more than 1400bp far from the top TSS")
+plot1
+
+
+
+```
+

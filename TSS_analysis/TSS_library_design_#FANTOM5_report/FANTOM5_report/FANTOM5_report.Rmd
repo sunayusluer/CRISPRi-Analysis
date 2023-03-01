@@ -1,0 +1,193 @@
+---
+title: "TSS usage in FANTOM5 human iPSC samples"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setting up the analysis
+### Loading the required packages
+```{r}
+library("readr")
+library("dplyr")
+library("data.table")
+```
+
+### Importing the raw data from FANTOM5
+I downloaded the reprocessed FANTOM5 data from the FANTOM5 FTP site [^1]. In this version the CAGE peak coordinates have been lifted over to GRCh38 coordinates and all of the reads have been realigned to the GRCh38 reference genome. More details can be found in this paper [^2]. The data was first published in this FANTOM5 Consortium publication [^3].
+
+We need three files from this dataset. The first one is the bed file containing the coordinates of all of the CAGE peaks:
+```{r}
+fantom5_peaks = readr::read_tsv("FANTOM5/hg38/promoters/hg38_fair+new_CAGE_peaks_phase1and2.bed.gz",
+                                col_names = c("us_chr","peak_start", "peak_end", "feature_id", "peak_score", 
+                                              "strand", "tss_start","tss_end", "score"), 
+                                col_types = "ciiciciic")
+fantom5_peaks
+```
+
+The second is an annotation file containing high-confidence assignment of CAGE TSSs to their target genes:
+```{r}
+fantom5_annot = readr::read_tsv("FANTOM5/hg38/promoters/hg38_fair+new_CAGE_peaks_phase1and2_ann.txt.gz", 
+                                comment = "##", col_types = "ccccccc") %>%
+  dplyr::rename(feature_id = `00Annotation`) %>%
+  tidyr::separate(feature_id, c("old_tss_id", "tss_id"), sep = ";")
+fantom5_annot
+```
+
+The final file is a large count matrix containing the CAGE read counts for each CAGE peak in each of the 1830 FANTOM5 samples.
+```{r}
+fantom5_counts = readr::read_tsv("FANTOM5/hg38/promoters/hg38_fair+new_CAGE_peaks_phase1and2_counts.osc.txt.gz", comment = "##")
+dim(fantom5_counts)
+```
+
+## Format the data
+Rename chromosomes and format the peak coordinates table:
+```{r}
+#Map US-style chromosome names to Ensembl style
+chromosome_map = data_frame(chr = c(as.character(c(1:22)), "X","Y","MT"),
+                            us_chr = c(paste("chr",c(as.character(c(1:22)), "X","Y"), sep = ""), "chrM"))
+
+#Format TSSs
+tss_df = dplyr::left_join(fantom5_peaks, chromosome_map, by = "us_chr") %>% 
+  tidyr::separate(feature_id, c("old_tss_id", "tss_id"), sep = ";") %>% 
+  dplyr::select(tss_id, chr, peak_start, peak_end, peak_score, strand, tss_start, tss_end)
+tss_df
+```
+
+### Map all TSS ids to gene names
+For some genes the original peak annotation file contains multiple gene ids separate by comma. Let's fix that:
+```{r}
+tss_gene_map = dplyr::select(fantom5_annot, tss_id, short_description) %>%
+  dplyr::filter(short_description %like% "@") %>% 
+  tidyr::separate(short_description, c("first", "second", "third", "fourth", "fifth", "sixth", "seventh"), sep = ",") %>% 
+  tidyr::gather("pos", "short_description", first:seventh) %>% 
+  dplyr::select(tss_id, short_description) %>% 
+  dplyr::filter(!is.na(short_description)) %>%
+  tidyr::separate(short_description, c("promoter_rank", "gene_name"), sep = "@") %>%
+  dplyr::mutate(promoter_rank = stringr::str_replace(promoter_rank, "p", "")) %>%
+  dplyr::mutate(promoter_rank = as.integer(promoter_rank)) %>%
+  dplyr::group_by(tss_id) %>%
+  dplyr::mutate(gene_count = length(gene_name)) %>%
+  dplyr::ungroup()
+tss_gene_map
+```
+
+## Merge TSS annotations with TSS coordinates
+In this step we only consider those TSSs that have been confidently assigned to genes by the FANTOM5 consortium (about 50% of the TSSes). The other TSSes are ignored, because it's not clear which gene (if any) they should belong to.
+```{r}
+tss_data = dplyr::left_join(tss_gene_map, tss_df, by = "tss_id")
+tss_data
+```
+
+We noticed before that some TSSes are assigned to multiple genes. Let's count them:
+```{r}
+dplyr::select(tss_data, tss_id, gene_count) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(gene_count) %>%
+  dplyr::summarise(number_of_TSS = length(tss_id))
+```
+
+Looks like there are 689 TSSes that are assigned to more then one gene. If necessary, these TSSes can easily be filtered out:
+```{r}
+dplyr::filter(tss_data, gene_count == 1)
+```
+
+Currently they are included in the results.
+
+## Extracting reads counts for the iPSC samples in FANTOM5
+
+First, we need to extract TSS ids from the count matrix:
+```{r}
+count_ids = fantom5_counts[-1,1] %>% 
+  dplyr::rename(feature_id = `00Annotation`) %>% 
+  tidyr::separate(feature_id, c("old_tss_id", "tss_id"), sep = ";")
+```
+
+Next we can find out which FANTOM5 samples are from iPSCs:
+```{r}
+sample_names = colnames(fantom5_counts)
+sample_set1 = sample_names[(sample_names %like% "hIPS")]
+sample_set2 = sample_names[(sample_names %like% "iPS") & (sample_names %like% "day00") & (sample_names %like% "control")]
+ipsc_samples = c(sample_set1, sample_set2)
+ipsc_samples
+```
+
+And extract those samples from the full count matrix:
+```{r}
+ipsc_counts = as.matrix(fantom5_counts[, ipsc_samples])
+colnames(ipsc_counts) = paste("iPSC_", c(1:12), sep = "") #Rename colums to improve readability
+
+#The first row of the matrix is library size
+library_sizes = ipsc_counts[1,]/1e6
+ipsc_counts = ipsc_counts[-1,] #remove first row
+rownames(ipsc_counts) = count_ids$tss_id
+head(ipsc_counts)
+```
+
+Normalise the count matrix by library size and calculate median
+```{r}
+cpm_matrix = t((t(ipsc_counts)/library_sizes))
+median_cpm = apply(cpm_matrix, 1, median)
+cpm_df = dplyr::data_frame(tss_id = names(median_cpm), median_cpm = median_cpm)
+```
+
+Rank iPSC promoters by their median counts per million (CPM) value:
+```{r}
+tss_cpm = dplyr::left_join(tss_data, cpm_df, by = "tss_id") %>%
+  dplyr::group_by(gene_name) %>% 
+  dplyr::arrange(gene_name, -median_cpm) %>% 
+  dplyr::mutate(cpm_rank = 1:length(gene_name)) %>% 
+  dplyr::mutate(cpm_max = max(median_cpm)) %>% #Keep the maximal median CPM across promoters. Can be used to identify expressed genes.
+  dplyr::ungroup()
+```
+
+Also, it seems that the promoter rank provided in the original bed file does not always agree with the peak_score value provided in the same bed file. A quick inspection revealed that the *peak_score* was better at capturing canonical promoters than the promoter rank provided in the bed file (~200 genes were affected). Thus, let's perform a second ranking based on the *peak_score* column. 
+```{r}
+tss_ranks = dplyr::group_by(tss_cpm, gene_name) %>%
+  dplyr::arrange(gene_name, -peak_score) %>%
+  dplyr::mutate(canonical_rank = 1:length(gene_name)) %>% 
+  dplyr::ungroup() %>%
+  dplyr::select(-promoter_rank) #Removing the original promoter rank since it's not clear what it means
+tss_ranks
+```
+
+## Export results
+Export the full TSS table
+```{r}
+write.table(tss_ranks, "results/iPSC_FANTOM5_promoters.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+Finally, we can idenify genes for which the most commonly used TSS in iPSCs (cpm_rank == 1) is different from the most commonly used TSS across all samples (canonical_rank == 1).
+```{r}
+#Keep only expressed genes
+expressed_genes = dplyr::filter(tss_ranks, cpm_max > 1)
+
+#Identify most commonly used TSSes in iPSCs that are not canonical TSSes
+different_rank = dplyr::filter(expressed_genes, cpm_rank == 1) %>%
+  dplyr::filter(canonical_rank >= 2)
+nrow(different_rank)
+```
+There are 1176 such genes. It seems that in most cases the most commonly used TSS in iPSCs is the second most commonly used TSS accross all cell types, suggesting that they are probably reflecting genes with multiple actively used promoters:
+```{r}
+table(different_rank$canonical_rank)
+```
+
+We can also extract these genes for further analysis
+```{r}
+different_rank_genes = dplyr::filter(expressed_genes, gene_name %in% different_rank$gene_name) %>% 
+  dplyr::arrange(gene_name, cpm_rank)
+different_rank_genes
+```
+
+And export
+```{r}
+write.table(different_rank_genes, "results/iPSC_FANTOM5_promoters.different_rank.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+## References
+[^1]: [FANTOM5 GRCh38 ftp site](http://fantom.gsc.riken.jp/5/datafiles/reprocessed/hg38_latest/)
+[^2]: [FANTOM5 CAGE profiles of human and mouse reprocessed for GRCh38 and GRCm38 genome assemblies](https://www.nature.com/articles/sdata2017107)
+[^3]: [A promoter-level mammalian expression atlas](http://dx.doi.org/10.1038/nature13182)
+
